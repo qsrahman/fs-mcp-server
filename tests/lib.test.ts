@@ -2,13 +2,15 @@ import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { applyFileEdits } from '../src/edit.js'
 import {
-  applyFileEdits,
+  MAX_READ_BYTES,
   headFile,
+  readFileContent,
   tailFile,
-  validatePath,
   writeFileContent,
-} from '../src/lib.js'
+} from '../src/files.js'
+import { validatePath } from '../src/paths.js'
 
 let root: string
 let outside: string
@@ -238,5 +240,72 @@ describe('edit_file no-match error', () => {
     expect(await edit('a1\nb2\nc3\n', 'b2x', 1, 2)).toContain(
       'after the earlier edits in this call',
     )
+  })
+})
+
+describe('regressions', () => {
+  it('head closes its file descriptor on an early exit', async () => {
+    const f = path.join(root, 'big.txt')
+    await fs.writeFile(f, 'x\n'.repeat(200_000))
+    const open = async () => (await fs.readdir('/dev/fd')).length
+    const before = await open()
+    for (let i = 0; i < 30; i++) await headFile(f, 1)
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    expect(await open()).toBeLessThan(before + 5)
+  })
+
+  it('rejects an empty oldText instead of prepending', async () => {
+    const f = path.join(root, 'a.txt')
+    await fs.writeFile(f, 'hello\n')
+    await expect(
+      applyFileEdits(f, [{ oldText: '', newText: 'X' }]),
+    ).rejects.toThrow('empty')
+    expect(await fs.readFile(f, 'utf-8')).toBe('hello\n')
+  })
+
+  it('refuses to edit a file that is not valid UTF-8, leaving its bytes alone', async () => {
+    const f = path.join(root, 'b.bin')
+    const bytes = Buffer.from([0x68, 0x69, 0x0a, 0xff, 0xfe, 0x0a])
+    await fs.writeFile(f, bytes)
+    await expect(
+      applyFileEdits(f, [{ oldText: 'hi', newText: 'ho' }]),
+    ).rejects.toThrow('UTF-8')
+    expect((await fs.readFile(f)).equals(bytes)).toBe(true)
+  })
+
+  it('accepts a filesystem root as an allowed directory', async () => {
+    expect(
+      await validatePath(path.join(root, 'x'), [path.parse(root).root]),
+    ).toBe(path.join(root, 'x'))
+  })
+})
+
+describe('read limits and tail', () => {
+  it('refuses a whole-file read over the limit but still serves head and tail', async () => {
+    const f = path.join(root, 'huge.txt')
+    await fs.writeFile(f, 'a\n'.repeat(MAX_READ_BYTES / 2 + 1))
+    await expect(readFileContent(f)).rejects.toThrow('Use head or tail')
+    expect(await headFile(f, 2)).toBe('a\na')
+    expect(await tailFile(f, 2)).toBe('a\na')
+  })
+
+  it('tails across chunk boundaries, with multi-byte text and no final newline', async () => {
+    const f = path.join(root, 'many.txt')
+    const lines = Array.from({ length: 20_000 }, (_, i) => `line ${i} é€`)
+    await fs.writeFile(f, lines.join('\n'))
+    expect(await tailFile(f, 3)).toBe(lines.slice(-3).join('\n'))
+    await fs.writeFile(f, lines.join('\n') + '\n')
+    expect(await tailFile(f, 3)).toBe(lines.slice(-3).join('\n'))
+    expect(await tailFile(f, 50_000)).toBe(lines.join('\n'))
+  })
+
+  it('names a broken symlink instead of a generic error', async () => {
+    await fs.symlink(
+      path.join(root, 'missing-target'),
+      path.join(root, 'dangling'),
+    )
+    await expect(
+      validatePath(path.join(root, 'dangling'), [root]),
+    ).rejects.toThrow('Broken symlink')
   })
 })

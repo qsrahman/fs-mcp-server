@@ -6,19 +6,20 @@ The tools are ported, in trimmed form, from the reference [filesystem server](ht
 
 ## Tools
 
-| Tool                  | What it does                                                                                              |
-| --------------------- | --------------------------------------------------------------------------------------------------------- |
-| `read_file`           | Read a file as text. Optional `head` or `tail` returns only the first or last N lines (not both).         |
-| `read_multiple_files` | Read several files at once. A failure on one file is reported inline and does not stop the others.        |
-| `write_file`          | Create a file or overwrite it completely.                                                                 |
-| `edit_file`           | Apply ordered `{oldText, newText}` edits and return a git-style diff. `dryRun` previews without writing. |
+| Tool                  | What it does                                                                                                                                                        |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `read_file`           | Read a file as text. Optional `head` or `tail` returns only the first or last N lines (not both). Whole-file reads are capped at 10 MiB; `head` and `tail` are not. |
+| `read_multiple_files` | Read up to 50 files at once. A failure on one file is reported inline and does not stop the others.                                                                 |
+| `write_file`          | Create a file or overwrite it completely.                                                                                                                           |
+| `edit_file`           | Apply ordered `{oldText, newText}` edits and return a git-style diff. `dryRun` previews without writing.                                                            |
 
 ### Edit behaviour
 
 - Each edit replaces the first match of `oldText`, applied in order to the result of the previous edit.
 - If there is no exact match, whole lines are matched ignoring leading and trailing whitespace, and the replacement takes the file's indentation.
 - If any edit fails to match, nothing is written.
-- Line endings (LF or CRLF) are preserved.
+- Line endings are preserved for files that use LF or CRLF consistently. A file with mixed endings is rewritten with its more common one (LF on a tie).
+- Files that are not valid UTF-8 are refused, so their bytes are never rewritten. An empty `oldText` is rejected.
 - A failed match reports which edit failed and quotes the closest lines of the file, numbered, with the first differing line, so the edit can be retried accurately.
 
 ## Security model
@@ -65,16 +66,19 @@ At least one accessible directory is required, otherwise the server exits.
 | ------------------- | --------------------------------- |
 | `pnpm build`        | Compile `src/` to `dist/`         |
 | `pnpm watch`        | Compile on change                 |
-| `pnpm typecheck`    | Type-check `src/` without emitting |
+| `pnpm typecheck`    | Type-check `src/` and `tests/`    |
 | `pnpm test`         | Run the vitest suite              |
 | `pnpm format`       | Format with prettier              |
 | `pnpm format:check` | Check formatting                  |
 
 Source layout:
 
-- `src/index.ts`: tool registration, command-line parsing, stdio entry point.
-- `src/lib.ts`: path validation and file operations.
-- `tests/`: vitest tests for `src/lib.ts` and the server (in-memory MCP client).
+- `src/index.ts`: command-line parsing and the stdio entry point.
+- `src/server.ts`: `createServer`, the tool registrations (and `--read-only` filtering).
+- `src/paths.ts`: `validatePath`.
+- `src/files.ts`: read, head, tail and write.
+- `src/edit.ts`: the `edit_file` engine.
+- `tests/`: vitest tests for the modules above and the server (in-memory MCP client).
 
 ## License
 

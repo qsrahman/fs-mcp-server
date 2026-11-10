@@ -12,14 +12,14 @@
     "build": "tsc",
     "start": "pnpm build && node dist/index.js",
     "watch": "tsc --watch",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc -p tsconfig.test.json",
     "test": "vitest run",
     "test:watch": "vitest",
     "format": "prettier --write .",
     "format:check": "prettier --check ."
   },
   "files": [
-    "src",
+    "dist",
     "README.md",
     "CLAUDE.md",
     "AGENTS.md",

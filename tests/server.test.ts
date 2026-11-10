@@ -1,10 +1,12 @@
+import { readFileSync } from 'node:fs'
 import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { Client, InMemoryTransport } from '@modelcontextprotocol/client'
 import { serveStdio } from '@modelcontextprotocol/server/stdio'
-import { createServer, parseArgs } from '../src/index.js'
+import { parseArgs } from '../src/index.js'
+import { createServer } from '../src/server.js'
 
 let dir: string
 let closers: Array<() => Promise<void>>
@@ -136,5 +138,46 @@ describe('parseArgs', () => {
       directories: ['--read-only'],
       readOnly: false,
     })
+  })
+})
+
+describe('inputs and outputs', () => {
+  it('rejects an empty oldText and too many paths at the schema', async () => {
+    const client = await connect(false)
+    const file = path.join(dir, 'note.txt')
+    const empty = await client
+      .callTool({
+        name: 'edit_file',
+        arguments: { path: file, edits: [{ oldText: '', newText: 'x' }] },
+      })
+      .catch(() => ({ isError: true }))
+    expect(empty.isError).toBe(true)
+    expect(await fs.readFile(file, 'utf-8')).toBe('original')
+    const many = await client
+      .callTool({
+        name: 'read_multiple_files',
+        arguments: { paths: Array.from({ length: 51 }, () => file) },
+      })
+      .catch(() => ({ isError: true }))
+    expect(many.isError).toBe(true)
+  })
+
+  it('returns file contents once, without a duplicate structuredContent', async () => {
+    const client = await connect(false)
+    const result = await client.callTool({
+      name: 'read_file',
+      arguments: { path: path.join(dir, 'note.txt') },
+    })
+    expect(result.structuredContent).toBeUndefined()
+  })
+})
+
+describe('server info', () => {
+  it('reports the version from package.json', async () => {
+    const client = await connect(false)
+    const pkg = JSON.parse(readFileSync('package.json', 'utf-8')) as {
+      version: string
+    }
+    expect(client.getServerVersion()?.version).toBe(pkg.version)
   })
 })
