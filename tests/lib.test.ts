@@ -125,3 +125,118 @@ describe('applyFileEdits', () => {
     expect(await fs.readFile(f, 'utf-8')).toBe('if (x) {\r\n    baz()\r\n}\r\n')
   })
 })
+
+describe('validatePath edge cases', () => {
+  it('rejects a NUL byte', async () => {
+    await expect(validatePath(path.join(root, 'a\0b'), [root])).rejects.toThrow(
+      'Access denied',
+    )
+  })
+
+  it('allows the allowed directory itself', async () => {
+    expect(await validatePath(root, [root])).toBe(root)
+  })
+
+  it('refuses ~ when home is outside the allowed directories', async () => {
+    await expect(validatePath('~/x', [root])).rejects.toThrow('Access denied')
+  })
+
+  it('resolves relative paths against the first allowed directory, not the cwd', async () => {
+    await fs.writeFile(path.join(root, 'rel.txt'), 'x')
+    expect(await validatePath('rel.txt', [root])).toBe(
+      path.join(root, 'rel.txt'),
+    )
+    await expect(validatePath('../escape', [root])).rejects.toThrow(
+      'Access denied',
+    )
+  })
+
+  it('refuses a new file under a symlinked directory that leaves', async () => {
+    await fs.symlink(outside, path.join(root, 'out'))
+    await expect(
+      validatePath(path.join(root, 'out', 'new.txt'), [root]),
+    ).rejects.toThrow('Access denied')
+  })
+
+  it('follows a symlink that stays inside', async () => {
+    await fs.writeFile(path.join(root, 'real.txt'), 'x')
+    await fs.symlink(path.join(root, 'real.txt'), path.join(root, 'in'))
+    expect(await validatePath(path.join(root, 'in'), [root])).toBe(
+      path.join(root, 'real.txt'),
+    )
+  })
+
+  it('does not write through a dangling symlink pointing outside', async () => {
+    const target = path.join(outside, 'not-yet')
+    await fs.symlink(target, path.join(root, 'dangling'))
+    const validated = await validatePath(path.join(root, 'dangling'), [
+      root,
+    ]).catch(() => null)
+    if (validated)
+      await expect(writeFileContent(validated, 'bad')).rejects.toThrow()
+    await expect(fs.access(target)).rejects.toThrow()
+  })
+})
+
+describe('edit_file no-match error', () => {
+  const edit = async (
+    content: string,
+    oldText: string,
+    index = 0,
+    count = 1,
+  ) => {
+    const f = path.join(root, 'm.txt')
+    await fs.writeFile(f, content)
+    const edits = Array.from({ length: count }, (_, i) =>
+      i === index
+        ? { oldText, newText: 'x' }
+        : { oldText: content.split('\n')[0], newText: content.split('\n')[0] },
+    )
+    return applyFileEdits(f, edits).then(
+      () => '',
+      (e: Error) => e.message,
+    )
+  }
+
+  it('names the edit, quotes the closest numbered lines and says nothing was applied', async () => {
+    const message = await edit('alpha\nbeta gamma\ndelta\n', 'beta  gamma')
+    expect(message).toContain('edit 1 of 1')
+    expect(message).toContain('No edits were applied')
+    expect(message).toContain('2: beta gamma')
+    expect(message).toContain('First difference')
+  })
+
+  it('says so when no line resembles oldText, or the file is empty', async () => {
+    expect(await edit('aaa\nbbb\n', 'zzzz')).toContain(
+      'No line of the file resembles oldText',
+    )
+    expect(await edit('', 'zzzz')).toContain('The file is empty')
+  })
+
+  it('reports oldText that runs past the end of the file', async () => {
+    expect(await edit('one\ntwo\n', 'two\nthree')).toContain(
+      'runs past the end of the file',
+    )
+  })
+
+  it('cuts a very long file line', async () => {
+    const message = await edit('x'.repeat(2000) + '\n', 'x'.repeat(10) + 'y')
+    expect(message).toContain('[... cut: the line has 2000 characters]')
+  })
+
+  it('caps the quoted region at 30 lines', async () => {
+    const lines = Array.from({ length: 100 }, (_, i) => `line ${i}`)
+    const message = await edit(
+      lines.join('\n') + '\n',
+      lines.slice(10, 70).join('\n') + '\nDIFF',
+    )
+    const quoted = message.match(/^\d+: /gm) ?? []
+    expect(quoted.length).toBeLessThanOrEqual(30)
+  })
+
+  it('notes earlier edits when a later edit fails', async () => {
+    expect(await edit('a1\nb2\nc3\n', 'b2x', 1, 2)).toContain(
+      'after the earlier edits in this call',
+    )
+  })
+})

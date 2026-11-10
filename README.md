@@ -8,7 +8,7 @@ The tools are ported, in trimmed form, from the reference [filesystem server](ht
 
 | Tool                  | What it does                                                                                              |
 | --------------------- | --------------------------------------------------------------------------------------------------------- |
-| `read_text_file`      | Read a file as text. Optional `head` or `tail` returns only the first or last N lines (not both).         |
+| `read_file`           | Read a file as text. Optional `head` or `tail` returns only the first or last N lines (not both).         |
 | `read_multiple_files` | Read several files at once. A failure on one file is reported inline and does not stop the others.        |
 | `write_file`          | Create a file or overwrite it completely.                                                                 |
 | `edit_file`           | Apply ordered `{oldText, newText}` edits and return a git-style diff. `dryRun` previews without writing. |
@@ -19,6 +19,7 @@ The tools are ported, in trimmed form, from the reference [filesystem server](ht
 - If there is no exact match, whole lines are matched ignoring leading and trailing whitespace, and the replacement takes the file's indentation.
 - If any edit fails to match, nothing is written.
 - Line endings (LF or CRLF) are preserved.
+- A failed match reports which edit failed and quotes the closest lines of the file, numbered, with the first differing line, so the edit can be retried accurately.
 
 ## Security model
 
@@ -38,8 +39,10 @@ Requires Node.js and [pnpm](https://pnpm.io).
 ```bash
 pnpm install
 pnpm build
-node dist/index.js /path/to/dir [/another/dir ...]
+node dist/index.js [--read-only] /path/to/dir [/another/dir ...]
 ```
+
+`--read-only` serves only tools annotated `readOnlyHint: true` (`read_file`, `read_multiple_files`); the write tools are absent from `tools/list`. Use `--` to pass a directory literally named `--read-only`.
 
 At least one accessible directory is required, otherwise the server exits.
 
@@ -71,7 +74,7 @@ Source layout:
 
 - `src/index.ts`: tool registration, command-line parsing, stdio entry point.
 - `src/lib.ts`: path validation and file operations.
-- `tests/`: vitest tests for `src/lib.ts`.
+- `tests/`: vitest tests for `src/lib.ts` and the server (in-memory MCP client).
 
 ## License
 

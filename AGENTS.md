@@ -4,13 +4,13 @@ Guidance for AI coding agents working in this repo. See [README.md](README.md) f
 
 ## Overview
 
-A stdio MCP server (TypeScript, ESM, Node) exposing four filesystem tools: `read_text_file`, `read_multiple_files`, `write_file`, `edit_file`. It is a trimmed port of the reference server at `modelcontextprotocol/servers/src/filesystem`.
+A stdio MCP server (TypeScript, ESM, Node) exposing four filesystem tools: `read_file`, `read_multiple_files`, `write_file`, `edit_file`. It is a trimmed port of the reference server at `modelcontextprotocol/servers/src/filesystem`.
 
 ## Layout
 
-- `src/index.ts`: tool registration (`createServer`), CLI arg handling, stdio entry point. Importing it starts the server.
+- `src/index.ts`: tool registration (`createServer`), CLI arg parsing (`--read-only`), stdio entry point. `main()` runs only when the file is the process entry point, so importing it (as tests do) starts nothing.
 - `src/lib.ts`: `validatePath` and all file operations. Put new filesystem logic here, not in the tool handlers.
-- `tests/*.test.ts`: vitest. Currently covers `src/lib.ts`.
+- `tests/*.test.ts`: vitest. `lib.test.ts` covers `src/lib.ts`; `server.test.ts` drives `createServer` through an in-memory MCP client.
 - `dist/`: build output (`pnpm build`). Never edit by hand.
 
 ## Commands
@@ -30,6 +30,7 @@ Before finishing a change, run `pnpm typecheck && pnpm test && pnpm format:check
 - Prefer Node built-ins and already-installed deps (`zod`, `diff`, `@modelcontextprotocol/server`) over hand-rolled code.
 - Keep it minimal. Do not add features, abstractions or tools that were not requested.
 - Tool schemas use `zod` objects. Handlers return `{ content: [{type: 'text', text}], structuredContent: { content } }` and signal failure by throwing.
+- Read-only mode keys on the `readOnlyHint` annotation. Every tool must set it truthfully; a tool without `readOnlyHint: true` is withheld under `--read-only`.
 
 ## Security invariants
 

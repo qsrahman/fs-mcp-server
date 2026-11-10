@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 
+import { realpathSync } from 'node:fs'
 import fs from 'node:fs/promises'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { McpServer } from '@modelcontextprotocol/server'
 import { serveStdio } from '@modelcontextprotocol/server/stdio'
 import { z } from 'zod'
@@ -21,13 +23,37 @@ const text = (content: string) => ({
 
 const outputSchema = z.object({ content: z.string() })
 
-export function createServer(allowedDirs: readonly string[]): McpServer {
+export interface ServerOptions {
+  /** Serve only tools annotated `readOnlyHint: true`. */
+  readOnly?: boolean
+}
+
+export function createServer(
+  allowedDirs: readonly string[],
+  { readOnly = false }: ServerOptions = {},
+): McpServer {
   const server = new McpServer({ name: 'fs-mcp-server', version: '0.1.0' })
 
+  // Keyed on the annotation, not a list of write tools, so a new tool is
+  // withheld unless it declares itself read-only. A withheld tool is removed
+  // before any client connects, so it is absent from tools/list.
+  if (readOnly) {
+    const register = server.registerTool.bind(server)
+    server.registerTool = ((
+      name: string,
+      config: Parameters<typeof register>[1],
+      handler: Parameters<typeof register>[2],
+    ) => {
+      const tool = register(name, config, handler)
+      if (config.annotations?.readOnlyHint !== true) tool.remove()
+      return tool
+    }) as typeof server.registerTool
+  }
+
   server.registerTool(
-    'read_text_file',
+    'read_file',
     {
-      title: 'Read Text File',
+      title: 'Read File',
       description:
         'Read the complete contents of a file as text. Use the head parameter ' +
         'to read only the first N lines, or the tail parameter to read only ' +
@@ -197,31 +223,48 @@ async function resolveAllowedDirectories(args: string[]): Promise<string[]> {
   return dirs
 }
 
+export function parseArgs(args: string[]) {
+  const directories: string[] = []
+  let readOnly = false
+  let options = true
+  for (const arg of args) {
+    if (options && arg === '--') options = false
+    else if (options && arg === '--read-only') readOnly = true
+    else directories.push(arg)
+  }
+  return { directories, readOnly }
+}
+
 async function main() {
-  const args = process.argv.slice(2)
-  if (args.length === 0) {
+  const { directories, readOnly } = parseArgs(process.argv.slice(2))
+  if (directories.length === 0) {
     console.error(
-      'Usage: fs-mcp-server <allowed-directory> [additional-directories...]',
+      'Usage: fs-mcp-server [--read-only] <allowed-directory> [additional-directories...]',
     )
     process.exit(1)
   }
-  const allowedDirs = await resolveAllowedDirectories(args)
+  const allowedDirs = await resolveAllowedDirectories(directories)
   if (allowedDirs.length === 0) {
     console.error('Error: none of the specified directories are accessible')
     process.exit(1)
   }
-  serveStdio(() => createServer(allowedDirs), {
+  serveStdio(() => createServer(allowedDirs, { readOnly }), {
     onerror: (error) => {
       console.error('Transport error:', error)
       process.exitCode = 1
     },
   })
   console.error(
-    `FS MCP Server running on stdio. Allowed: ${allowedDirs.join(', ')}`,
+    `FS MCP Server running on stdio${readOnly ? ' (read-only)' : ''}. Allowed: ${allowedDirs.join(', ')}`,
   )
 }
 
-main().catch((error) => {
-  console.error('Fatal error running server:', error)
-  process.exit(1)
-})
+// Run only as the entry point (npm links the bin via a symlink, hence realpath),
+// so importing this module, as the tests do, starts nothing.
+const entry = process.argv[1]
+if (entry && realpathSync(entry) === fileURLToPath(import.meta.url)) {
+  main().catch((error) => {
+    console.error('Fatal error running server:', error)
+    process.exit(1)
+  })
+}
