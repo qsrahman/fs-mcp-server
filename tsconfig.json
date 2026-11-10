@@ -1,0 +1,48 @@
+{
+  "compilerOptions": {
+    /* Base Options: */
+    "target": "esnext",
+    "moduleResolution": "nodenext",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "skipLibCheck": true,
+    "verbatimModuleSyntax": true,
+    /* If transpiling with TypeScript: */
+    "module": "nodenext",
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "sourceMap": true,
+    /* AND if you're building for a library: */
+    // "declaration": true,
+    /* AND if you're building for a library in a monorepo: */
+    // "composite": true,
+    // "declarationMap": true,
+    /* If NOT transpiling with TypeScript: */
+    // "module": "preserve",
+    // "noEmit": true,
+    // "exactOptionalPropertyTypes": true,
+    /* Strictness */
+    "strict": true,
+    // "noUncheckedIndexedAccess": true,
+    // "noImplicitReturns": true,
+    "noImplicitOverride": true,
+    "allowUnusedLabels": false,
+    "allowUnreachableCode": false,
+    "noUncheckedSideEffectImports": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    // "noPropertyAccessFromIndexSignature": true,
+    // "erasableSyntaxOnly": true,
+    // "allowImportingTsExtensions": true,
+    "rewriteRelativeImportExtensions": false,
+    "forceConsistentCasingInFileNames": true,
+    /* If your code runs in the DOM: */
+    // "lib": ["es2022", "dom", "dom.iterable"],
+    /* If your code doesn't run in the DOM: */
+    "lib": ["ESNext"],
+    "types": ["node"]
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "**/node_modules"]
+}

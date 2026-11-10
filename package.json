@@ -1,0 +1,49 @@
+{
+  "name": "fs-mcp-server",
+  "version": "0.1.0",
+  "description": "",
+  "main": "dist/index.js",
+  "private": true,
+  "bin": {
+    "fs-mcp-server": "dist/index.js"
+  },
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "start": "pnpm build && node dist/index.js",
+    "watch": "tsc --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "files": [
+    "src",
+    "README.md",
+    "CLAUDE.md",
+    "AGENTS.md",
+    "LICENSE"
+  ],
+  "keywords": [],
+  "author": "Qazi Sami ur Rahman <qsrahmans@gmail.com>",
+  "license": "MIT",
+  "devEngines": {
+    "packageManager": {
+      "name": "pnpm",
+      "version": "^12.4.1",
+      "onFail": "download"
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "prettier": "^3.9.10",
+    "typescript": "^7.0.2",
+    "vitest": "^5.1.0"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/server": "^2.4.0",
+    "diff": "^9.0.0",
+    "zod": "^4.6.7"
+  }
+}
