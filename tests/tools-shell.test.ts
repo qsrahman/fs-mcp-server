@@ -26,14 +26,14 @@ describe('shell tool', () => {
     const client = await connect(false, true)
     const { isError, text } = await callShell(client, { command: 'pwd' })
     expect(isError).toBeFalsy()
-    expect(await fs.realpath(JSON.parse(text).stdout)).toBe(dir)
+    expect(await fs.realpath(text)).toBe(dir)
   })
 
   it('flags a failing command with isError and keeps the result', async () => {
     const client = await connect(false, true)
     const { isError, text } = await callShell(client, { command: 'exit 3' })
     expect(isError).toBe(true)
-    expect(JSON.parse(text)).toMatchObject({ ok: false, exitCode: 3 })
+    expect(text).toBe('exit code 3')
   })
 
   it('refuses a cwd outside the allowed directories', async () => {
@@ -53,6 +53,6 @@ describe('shell tool', () => {
       command: 'pwd',
       cwd: path.join(dir, 'sub'),
     })
-    expect(JSON.parse(text).stdout).toMatch(/sub$/)
+    expect(text).toMatch(/sub$/)
   })
 })

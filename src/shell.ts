@@ -31,6 +31,25 @@ function outputText(raw: string): string {
   return `${text.slice(0, HALF)}\n[... ${text.length - MAX_OUTPUT_CHARS} characters omitted; narrow the command to see the rest ...]\n${text.slice(-HALF)}`
 }
 
+/**
+ * The result as the model reads it. Plain text, not JSON: JSON escapes every
+ * newline and quote and adds a fixed frame, which costs tokens on every call.
+ * A command that succeeded and printed only to stdout gives just that output;
+ * the exit code is stated only when it is not 0, and stdout and stderr are
+ * labelled only when both, or stderr alone, have something to say.
+ */
+export function formatResult(result: CommandResult): string {
+  const { ok, stdout, stderr, exitCode } = result
+  if (ok && !stderr) return stdout || '(no output)'
+  return [
+    ok ? '' : `exit code ${exitCode}`,
+    stdout && `[stdout]\n${stdout}`,
+    stderr && `[stderr]\n${stderr}`,
+  ]
+    .filter(Boolean)
+    .join('\n')
+}
+
 /** Run `command` in `cwd`. A non-zero exit is a result, not a thrown error. */
 export async function runShell(
   command: string,

@@ -31,7 +31,7 @@ Use pnpm (the repo pins it via `devEngines`; plain npm refuses to run).
 - `pnpm test`: run vitest
 - `pnpm format`: prettier (no semicolons, single quotes, trailing commas)
 
-Before finishing a change, run `pnpm validate` (typecheck, test, format check).
+Before finishing a change, run `pnpm validate` (build, typecheck, test, format check). It builds first because `tests/cli.test.ts` runs the built `dist/index.js` as a separate process, the way a client does.
 
 ## Conventions
 
@@ -85,7 +85,7 @@ Known gaps (do not claim otherwise in docs): no protection against directory-swa
 - History: this was first published as `@qsrahman/fs-mcp-server` (0.1.0 and 0.2.0) and renamed when the web tools arrived, because the name no longer described it. That package is deprecated, and its trusted-publisher entry on npmjs.com is obsolete (it names the old repository). Do not reuse the old name.
 - The `bin` entry works through npm's symlink because `index.ts` compares real paths before running `main()`. Keep that guard.
 
-`.github/workflows/ci.yml` runs `pnpm validate` and the build on pushes to `main` and on pull requests (Node 22 and 24).
+`.github/workflows/ci.yml` runs `pnpm validate` (which builds) on pushes to `main` and on pull requests (Node 22 and 24).
 
 ### Releasing (GitHub Actions)
 

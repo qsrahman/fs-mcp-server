@@ -3,7 +3,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { runShell } from '../src/shell.js'
+import { formatResult, runShell } from '../src/shell.js'
 
 let dir: string
 
@@ -184,5 +184,42 @@ describe('output limits', () => {
 
   it('leaves ordinary output alone', async () => {
     expect((await run("printf 'plain text\\n'")).stdout).toBe('plain text')
+  })
+})
+
+describe('formatResult', () => {
+  const result = (stdout: string, stderr: string, exitCode: number) => ({
+    ok: exitCode === 0,
+    stdout,
+    stderr,
+    exitCode,
+  })
+
+  it('gives just the output of a command that succeeded quietly', () => {
+    expect(formatResult(result('a\nb', '', 0))).toBe('a\nb')
+  })
+
+  it('says so when there was no output', () => {
+    expect(formatResult(result('', '', 0))).toBe('(no output)')
+  })
+
+  it('states the exit code of a failure, with labelled streams', () => {
+    expect(formatResult(result('out', 'boom', 2))).toBe(
+      'exit code 2\n[stdout]\nout\n[stderr]\nboom',
+    )
+    expect(formatResult(result('', '', 1))).toBe('exit code 1')
+  })
+
+  it('labels the streams when a successful command also wrote to stderr', () => {
+    expect(formatResult(result('out', 'warning', 0))).toBe(
+      '[stdout]\nout\n[stderr]\nwarning',
+    )
+    expect(formatResult(result('', 'warning', 0))).toBe('[stderr]\nwarning')
+  })
+
+  it('keeps the note of a timeout, which is in stderr', async () => {
+    const text = formatResult(await run('sleep 5', 200))
+    expect(text).toContain('exit code')
+    expect(text).toContain('timed out after 200ms')
   })
 })

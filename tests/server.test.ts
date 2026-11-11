@@ -385,16 +385,11 @@ describe('without allowed directories', () => {
 
   it('runs the shell in the working directory unless told otherwise', async () => {
     const client = await connectTo(null)
-    const here = JSON.parse(
-      (await call(client, 'shell', { command: 'pwd' })).text,
-    )
-    expect(await fs.realpath(here.stdout)).toBe(
-      await fs.realpath(process.cwd()),
-    )
-    const there = JSON.parse(
-      (await call(client, 'shell', { command: 'pwd', cwd: other })).text,
-    )
-    expect(await fs.realpath(there.stdout)).toBe(other)
+    const here = (await call(client, 'shell', { command: 'pwd' })).text
+    expect(await fs.realpath(here)).toBe(await fs.realpath(process.cwd()))
+    const there = (await call(client, 'shell', { command: 'pwd', cwd: other }))
+      .text
+    expect(await fs.realpath(there)).toBe(other)
   })
 
   it('says so in the instructions and descriptions, without a stale restriction', async () => {

@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { validatePath } from '../paths.js'
-import { DEFAULT_TIMEOUT_MS, runShell } from '../shell.js'
+import { DEFAULT_TIMEOUT_MS, formatResult, runShell } from '../shell.js'
 import { text, type RegisterTool } from './common.js'
 
 export function registerShellTool(
@@ -12,7 +12,8 @@ export function registerShellTool(
     {
       title: 'Shell',
       description:
-        'Run a shell command and return its stdout, stderr and exit code as JSON. ' +
+        'Run a shell command and return its output. A failed command starts with its exit code; ' +
+        'stdout and stderr are labelled [stdout] and [stderr] when stderr has content. ' +
         'Use for tests, type checks, builds, git and similar. Do NOT use it to read, ' +
         'write or edit files (use the file tools), for interactive commands (stdin is ' +
         'closed), for commands that never exit (dev servers, watch modes), or for ' +
@@ -67,7 +68,7 @@ export function registerShellTool(
         ctx.mcpReq.signal,
       )
       // a non-zero exit is still a result; flag it so clients can see it failed
-      return { ...text(JSON.stringify(result, null, 2)), isError: !result.ok }
+      return { ...text(formatResult(result)), isError: !result.ok }
     },
   )
 }
