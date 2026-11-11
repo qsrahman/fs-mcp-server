@@ -1,6 +1,6 @@
 {
   "name": "@qsrahman/fs-mcp-server",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "MCP server for reading, writing and editing files, running shell commands and (with a Brave API key) searching the web, with switches to restrict it.",
   "main": "dist/index.js",
   "bin": {

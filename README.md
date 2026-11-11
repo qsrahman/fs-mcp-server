@@ -91,7 +91,7 @@ Install nothing; npx fetches the [published package](https://www.npmjs.com/packa
 npx -y @qsrahman/fs-mcp-server [--read-only] [--no-shell] [/path/to/dir ...]
 ```
 
-Other ways to run it: build from source (below), or install straight from GitHub with `npx -y github:qsrahman/fs-mcp-server`. A git install builds the package with its `prepare` script, which npm skips if `ignore-scripts` is set in your npm config. To try a local build, run `pnpm pack` and then `npx -y --package ./qsrahman-fs-mcp-server-0.1.0.tgz fs-mcp-server`.
+Other ways to run it: build from source (below), or install straight from GitHub with `npx -y github:qsrahman/fs-mcp-server`. A git install builds the package with its `prepare` script, which npm skips if `ignore-scripts` is set in your npm config. To try a local build, run `pnpm pack` and then `npx -y --package ./qsrahman-fs-mcp-server-0.2.0.tgz fs-mcp-server`.
 
 ### From source
 
