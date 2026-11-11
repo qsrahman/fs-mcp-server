@@ -43,7 +43,21 @@ Not covered: a directory being swapped for a symlink between validation and the 
 
 ## Usage
 
-Requires Node.js 22 or newer and [pnpm](https://pnpm.io).
+Requires Node.js 22 or newer.
+
+### With npx
+
+Once the package is published to npm:
+
+```bash
+npx -y fs-mcp-server [--read-only] [--enable-shell] /path/to/dir [/another/dir ...]
+```
+
+Before then, run a built tarball (`pnpm pack`, then `npx -y --package ./fs-mcp-server-0.1.0.tgz fs-mcp-server /path/to/dir`) or build from source below. Installing straight from a git URL builds the package with its `prepare` script, which npm skips if `ignore-scripts` is set in your npm config.
+
+### From source
+
+Requires [pnpm](https://pnpm.io).
 
 ```bash
 pnpm install
@@ -51,11 +65,28 @@ pnpm build
 node dist/index.js [--read-only] [--enable-shell] /path/to/dir [/another/dir ...]
 ```
 
+### Options
+
 `--enable-shell` adds the `shell` tool. `--read-only` serves only tools annotated `readOnlyHint: true` (`read_file`, `read_multiple_files`); the write tools are absent from `tools/list`. An unrecognised option is an error (a mistyped `--read-only` would otherwise start the server writable). Use `--` to pass a directory that starts with `--`.
 
 At least one accessible directory is required, otherwise the server exits.
 
 ### MCP client configuration
+
+With npx:
+
+```json
+{
+  "mcpServers": {
+    "fs": {
+      "command": "npx",
+      "args": ["-y", "fs-mcp-server", "/path/to/allowed/dir"]
+    }
+  }
+}
+```
+
+From a source checkout:
 
 ```json
 {

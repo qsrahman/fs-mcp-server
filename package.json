@@ -1,15 +1,15 @@
 {
   "name": "fs-mcp-server",
   "version": "0.1.0",
-  "description": "",
+  "description": "MCP server for reading, writing and editing files inside chosen directories, with an optional shell tool.",
   "main": "dist/index.js",
-  "private": true,
   "bin": {
     "fs-mcp-server": "dist/index.js"
   },
   "type": "module",
   "scripts": {
     "build": "tsc",
+    "prepare": "tsc",
     "start": "pnpm build && node dist/index.js",
     "watch": "tsc --watch",
     "typecheck": "tsc -p tsconfig.test.json",
@@ -21,12 +21,18 @@
   },
   "files": [
     "dist",
+    "!dist/**/*.map",
     "README.md",
-    "CLAUDE.md",
-    "AGENTS.md",
     "LICENSE"
   ],
-  "keywords": [],
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "filesystem",
+    "files",
+    "claude",
+    "llm"
+  ],
   "author": "Qazi Sami ur Rahman <qsrahmans@gmail.com>",
   "license": "MIT",
   "devEngines": {

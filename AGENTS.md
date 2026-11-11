@@ -49,6 +49,12 @@ The `shell` tool is the deliberate exception: only its `cwd` goes through `valid
 
 Known gaps (do not claim otherwise in docs): no protection against directory-swap races between validation and write, no Windows/WSL path handling, no case or Unicode path equivalence.
 
+## Publishing
+
+- `files` is a whitelist (`dist`, minus source maps, plus README and LICENSE); `prepare` runs `tsc`, so `npm publish`, `pnpm publish` and git installs all build first. Check the contents with `pnpm pack` before publishing.
+- `devEngines` pins pnpm, and plain `npm` commands in this repo fail with EBADDEVENGINES, so publish with `pnpm publish`.
+- The `bin` entry works through npm's symlink because `index.ts` compares real paths before running `main()`. Keep that guard.
+
 ## Gotchas
 
 - `tsconfig.json` has `rootDir: src` so the build emits `dist/index.js`; `tests/` is type-checked only through `tsconfig.test.json`. Do not add `tests` to `tsconfig.json` `include`.
