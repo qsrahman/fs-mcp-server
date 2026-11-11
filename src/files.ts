@@ -12,15 +12,43 @@ export const normalizeLineEndings = (text: string) =>
 // tail read only part of a file and have no such limit.
 export const MAX_READ_BYTES = 10 * 1024 * 1024
 
-export async function readFileContent(filePath: string): Promise<string> {
+export async function readFileContent(
+  filePath: string,
+  maxBytes: number = MAX_READ_BYTES,
+): Promise<string> {
   const { size } = await fs.stat(filePath)
-  if (size > MAX_READ_BYTES) {
+  if (size > maxBytes) {
     throw new Error(
-      `File is ${size} bytes, over the ${MAX_READ_BYTES} byte read limit. ` +
-        'Use head or tail to read part of it.',
+      `File is ${size} bytes, over the ${maxBytes} byte read limit. ` +
+        'Use read_file with head or tail to read part of it.',
     )
   }
   return fs.readFile(filePath, 'utf-8')
+}
+
+// read_multiple_files returns every file in one response, so its total is bounded too.
+export const MAX_MULTI_READ_BYTES = 10 * 1024 * 1024
+
+const queues = new Map<string, Promise<unknown>>()
+
+/**
+ * Run `fn` after every earlier call with the same key has finished, so two
+ * read-modify-write operations on one file cannot overlap and lose an update.
+ * Key on the path validatePath returned, which is the file's real path.
+ */
+export async function withFileLock<T>(
+  key: string,
+  fn: () => Promise<T>,
+): Promise<T> {
+  const run = (queues.get(key) ?? Promise.resolve()).then(fn)
+  // The stored tail never rejects, so one failure does not block later calls.
+  const tail = run.catch(() => {})
+  queues.set(key, tail)
+  try {
+    return await run
+  } finally {
+    if (queues.get(key) === tail) queues.delete(key)
+  }
 }
 
 export async function headFile(filePath: string, n: number): Promise<string> {

@@ -1,11 +1,13 @@
 import { readFileSync } from 'node:fs'
 import { McpServer } from '@modelcontextprotocol/server'
 import { z } from 'zod'
-import { applyFileEdits } from './edit.js'
+import { applyFileEdits, fileEditSchema } from './edit.js'
 import {
+  MAX_MULTI_READ_BYTES,
   headFile,
   readFileContent,
   tailFile,
+  withFileLock,
   writeFileContent,
 } from './files.js'
 import { validatePath } from './paths.js'
@@ -119,18 +121,21 @@ export function createServer(
       annotations: READ_ANNOTATIONS,
     },
     async (args) => {
-      const results = await Promise.all(
-        args.paths.map(async (filePath) => {
-          try {
-            const file = await validatePath(filePath, allowedDirs)
-            return `${filePath}:\n${await readFileContent(file)}\n`
-          } catch (error) {
-            const message =
-              error instanceof Error ? error.message : String(error)
-            return `${filePath}: Error - ${message}`
-          }
-        }),
-      )
+      // One at a time, against a shared byte budget, so the response and the
+      // memory held while building it stay bounded.
+      let remaining = MAX_MULTI_READ_BYTES
+      const results: string[] = []
+      for (const filePath of args.paths) {
+        try {
+          const file = await validatePath(filePath, allowedDirs)
+          const content = await readFileContent(file, remaining)
+          remaining -= Buffer.byteLength(content)
+          results.push(`${filePath}:\n${content}\n`)
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error)
+          results.push(`${filePath}: Error - ${message}`)
+        }
+      }
       return text(results.join('\n---\n'))
     },
   )
@@ -152,7 +157,7 @@ export function createServer(
     },
     async (args) => {
       const file = await validatePath(args.path, allowedDirs)
-      await writeFileContent(file, args.content)
+      await withFileLock(file, () => writeFileContent(file, args.content))
       return text(`Successfully wrote to ${args.path}`)
     },
   )
@@ -170,15 +175,7 @@ export function createServer(
         'within allowed directories.',
       inputSchema: z.object({
         path: z.string(),
-        edits: z.array(
-          z.object({
-            oldText: z
-              .string()
-              .min(1)
-              .describe('Text to search for - must match exactly'),
-            newText: z.string().describe('Text to replace with'),
-          }),
-        ),
+        edits: z.array(fileEditSchema).min(1),
         dryRun: z
           .boolean()
           .default(false)
@@ -193,7 +190,11 @@ export function createServer(
     },
     async (args) => {
       const file = await validatePath(args.path, allowedDirs)
-      return text(await applyFileEdits(file, args.edits, args.dryRun))
+      return text(
+        await withFileLock(file, () =>
+          applyFileEdits(file, args.edits, args.dryRun, args.path),
+        ),
+      )
     },
   )
 
@@ -252,13 +253,8 @@ export function createServer(
           args.timeoutMs,
           ctx.mcpReq.signal,
         )
-        return {
-          content: [
-            { type: 'text' as const, text: JSON.stringify(result, null, 2) },
-          ],
-          // a non-zero exit is still a result; flag it so clients can see it failed
-          isError: !result.ok,
-        }
+        // a non-zero exit is still a result; flag it so clients can see it failed
+        return { ...text(JSON.stringify(result, null, 2)), isError: !result.ok }
       },
     )
   }

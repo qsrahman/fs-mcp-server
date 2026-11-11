@@ -2,15 +2,93 @@
 // fallback, a git-style diff, and a descriptive error when nothing matches.
 import fs from 'node:fs/promises'
 import { createTwoFilesPatch } from 'diff'
+import { z } from 'zod'
 import { normalizeLineEndings, writeFileContent } from './files.js'
 
-export interface FileEdit {
-  oldText: string
-  newText: string
-}
+// The tool's input schema and the engine's argument type, defined once.
+export const fileEditSchema = z.object({
+  oldText: z
+    .string()
+    .min(1)
+    .describe('Text to search for - must match exactly'),
+  newText: z.string().describe('Text to replace with'),
+})
+export type FileEdit = z.infer<typeof fileEditSchema>
 
 function indentOf(line: string): string {
   return line.slice(0, line.length - line.trimStart().length)
+}
+
+/** `base` indentation moved by `delta` columns, adding the edit's own indent characters. */
+function shiftIndent(base: string, editIndent: string, delta: number): string {
+  return delta >= 0
+    ? base + editIndent.slice(editIndent.length - delta)
+    : base.slice(0, Math.max(0, base.length + delta))
+}
+
+/**
+ * Indent the replacement lines of a whitespace-tolerant match. `fileLines` are
+ * the file lines that matched `oldLines`.
+ *
+ * The edit's lines are lined up with the matched ones by their common leading
+ * and trailing lines (the unchanged context around a change):
+ * - a line with a counterpart in oldLines takes that file line's indentation,
+ *   plus or minus how much the edit indents it more or less than the old line;
+ * - a line the edit adds takes the indentation of the output line before it,
+ *   plus or minus how much the edit indents it more or less than the line
+ *   before it in the edit. (Anchoring it to oldText's last line instead put a
+ *   line added to a block at the closing brace's level.)
+ * A blank line is kept as given, and an indent never goes below column 0.
+ */
+function reindentReplacement(
+  oldLines: string[],
+  newLines: string[],
+  fileLines: string[],
+): string[] {
+  const trimmed = (lines: string[], n: number) => lines[n].trim()
+  const shared = Math.min(oldLines.length, newLines.length)
+  let head = 0
+  while (head < shared && trimmed(oldLines, head) === trimmed(newLines, head)) {
+    head++
+  }
+  let tail = 0
+  while (
+    tail < shared - head &&
+    trimmed(oldLines, oldLines.length - 1 - tail) ===
+      trimmed(newLines, newLines.length - 1 - tail)
+  ) {
+    tail++
+  }
+  const changedOld = oldLines.length - head - tail
+
+  // The old line a new line corresponds to, if it has one.
+  const counterpart = (j: number): number | undefined => {
+    if (j < head) return j
+    if (j >= newLines.length - tail)
+      return oldLines.length - (newLines.length - j)
+    if (j - head < changedOld) return j
+    return undefined
+  }
+
+  let previousEdit = -1 // indent width of the last non-blank line in the edit
+  let previousOut = '' // and the indentation it was given
+  return newLines.map((line, j) => {
+    const body = line.trimStart()
+    if (body === '') return line
+    const editIndent = indentOf(line)
+    const k = counterpart(j)
+    const indent =
+      k === undefined && previousEdit >= 0
+        ? shiftIndent(previousOut, editIndent, editIndent.length - previousEdit)
+        : shiftIndent(
+            indentOf(fileLines[k ?? 0]),
+            editIndent,
+            editIndent.length - indentOf(oldLines[k ?? 0]).length,
+          )
+    previousEdit = editIndent.length
+    previousOut = indent
+    return indent + body
+  })
 }
 
 // What the no-match error shows. A model that sent oldText which
@@ -197,6 +275,9 @@ export async function applyFileEdits(
   filePath: string,
   edits: FileEdit[],
   dryRun = false,
+  // The path shown in the diff header; the caller's own spelling rather than
+  // the resolved real path.
+  displayPath = filePath,
 ): Promise<string> {
   const bytes = await fs.readFile(filePath)
   const raw = bytes.toString('utf-8')
@@ -205,6 +286,7 @@ export async function applyFileEdits(
   if (!Buffer.from(raw, 'utf-8').equals(bytes)) {
     throw new Error(`Refusing to edit: not valid UTF-8 text: ${filePath}`)
   }
+  if (edits.length === 0) throw new Error('edits must not be empty')
   if (edits.some((edit) => edit.oldText === '')) {
     throw new Error('oldText must not be empty')
   }
@@ -228,18 +310,11 @@ export async function applyFileEdits(
     let matched = false
     for (let i = 0; i <= lines.length - oldLines.length; i++) {
       if (!oldLines.every((l, j) => l.trim() === lines[i + j].trim())) continue
-      const replacement = newLines.map((line, j) => {
-        const k = Math.min(j, oldLines.length - 1)
-        const body = line.trimStart()
-        if (body === '') return line
-        const delta = indentOf(line).length - indentOf(oldLines[k]).length
-        const fileIndent = indentOf(lines[i + k])
-        const indent =
-          delta >= 0
-            ? fileIndent + indentOf(line).slice(indentOf(line).length - delta)
-            : fileIndent.slice(0, Math.max(0, fileIndent.length + delta))
-        return indent + body
-      })
+      const replacement = reindentReplacement(
+        oldLines,
+        newLines,
+        lines.slice(i, i + oldLines.length),
+      )
       lines.splice(i, oldLines.length, ...replacement)
       modified = lines.join('\n')
       matched = true
@@ -253,8 +328,8 @@ export async function applyFileEdits(
   }
 
   const diff = createTwoFilesPatch(
-    filePath,
-    filePath,
+    displayPath,
+    displayPath,
     original,
     modified,
     'original',

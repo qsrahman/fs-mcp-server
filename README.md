@@ -9,7 +9,7 @@ The tools are ported, in trimmed form, from the reference [filesystem server](ht
 | Tool                  | What it does                                                                                                                                                        |
 | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `read_file`           | Read a file as text. Optional `head` or `tail` returns only the first or last N lines (not both). Whole-file reads are capped at 10 MiB; `head` and `tail` are not. |
-| `read_multiple_files` | Read up to 50 files at once. A failure on one file is reported inline and does not stop the others.                                                                 |
+| `read_multiple_files` | Read up to 50 files at once, 10 MiB in total (files past the budget are reported inline). A failure on one file is reported inline and does not stop the others.                                                                 |
 | `write_file`          | Create a file or overwrite it completely.                                                                                                                           |
 | `edit_file`           | Apply ordered `{oldText, newText}` edits and return a git-style diff. `dryRun` previews without writing.                                                            |
 | `shell`               | Run a shell command; returns stdout, stderr and exit code. **Opt-in** with `--enable-shell` (see below). |
@@ -19,6 +19,7 @@ The tools are ported, in trimmed form, from the reference [filesystem server](ht
 - Each edit replaces the first match of `oldText`, applied in order to the result of the previous edit.
 - If there is no exact match, whole lines are matched ignoring leading and trailing whitespace, and the replacement takes the file's indentation.
 - If any edit fails to match, nothing is written.
+- Writes and edits to the same file are serialized, so parallel calls cannot overwrite each other's changes.
 - Line endings are preserved for files that use LF or CRLF consistently. A file with mixed endings is rewritten with its more common one (LF on a tie).
 - Files that are not valid UTF-8 are refused, so their bytes are never rewritten. An empty `oldText` is rejected.
 - A failed match reports which edit failed and quotes the closest lines of the file, numbered, with the first differing line, so the edit can be retried accurately.
@@ -42,7 +43,7 @@ Not covered: a directory being swapped for a symlink between validation and the 
 
 ## Usage
 
-Requires Node.js and [pnpm](https://pnpm.io).
+Requires Node.js 22 or newer and [pnpm](https://pnpm.io).
 
 ```bash
 pnpm install
@@ -50,7 +51,7 @@ pnpm build
 node dist/index.js [--read-only] [--enable-shell] /path/to/dir [/another/dir ...]
 ```
 
-`--enable-shell` adds the `shell` tool. `--read-only` serves only tools annotated `readOnlyHint: true` (`read_file`, `read_multiple_files`); the write tools are absent from `tools/list`. Use `--` to pass a directory literally named `--read-only`.
+`--enable-shell` adds the `shell` tool. `--read-only` serves only tools annotated `readOnlyHint: true` (`read_file`, `read_multiple_files`); the write tools are absent from `tools/list`. An unrecognised `--option` is an error (a mistyped `--read-only` would otherwise start the server writable). Use `--` to pass a directory that starts with `--`.
 
 At least one accessible directory is required, otherwise the server exits.
 
@@ -77,6 +78,7 @@ At least one accessible directory is required, otherwise the server exits.
 | `pnpm test`         | Run the vitest suite              |
 | `pnpm format`       | Format with prettier              |
 | `pnpm format:check` | Check formatting                  |
+| `pnpm validate`     | Typecheck, test and format check  |
 
 Source layout:
 
@@ -86,7 +88,7 @@ Source layout:
 - `src/files.ts`: read, head, tail and write.
 - `src/shell.ts`: command execution for the shell tool (execa).
 - `src/edit.ts`: the `edit_file` engine.
-- `tests/`: vitest tests for the modules above and the server (in-memory MCP client).
+- `tests/`: vitest, one file per module (`paths`, `files`, `edit`, `shell`) plus `server.test.ts` (in-memory MCP client).
 
 ## License
 

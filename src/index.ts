@@ -36,19 +36,31 @@ export function parseArgs(args: string[]) {
     if (options && arg === '--') options = false
     else if (options && arg === '--read-only') readOnly = true
     else if (options && arg === '--enable-shell') enableShell = true
-    else directories.push(arg)
+    // A mistyped flag must not fall through as a directory: a typo in
+    // --read-only would silently start the server writable.
+    else if (options && arg.startsWith('--')) {
+      throw new Error(
+        `Unknown option: ${arg} (use -- before a directory that starts with --)`,
+      )
+    } else directories.push(arg)
   }
   return { directories, readOnly, enableShell }
 }
 
+const USAGE =
+  'Usage: fs-mcp-server [--read-only] [--enable-shell] <allowed-directory> [additional-directories...]'
+
 async function main() {
-  const { directories, readOnly, enableShell } = parseArgs(
-    process.argv.slice(2),
-  )
+  let parsed: ReturnType<typeof parseArgs>
+  try {
+    parsed = parseArgs(process.argv.slice(2))
+  } catch (error) {
+    console.error(`${(error as Error).message}\n${USAGE}`)
+    process.exit(1)
+  }
+  const { directories, readOnly, enableShell } = parsed
   if (directories.length === 0) {
-    console.error(
-      'Usage: fs-mcp-server [--read-only] [--enable-shell] <allowed-directory> [additional-directories...]',
-    )
+    console.error(USAGE)
     process.exit(1)
   }
   const allowedDirs = await resolveAllowedDirectories(directories)

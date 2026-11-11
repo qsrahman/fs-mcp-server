@@ -148,6 +148,11 @@ describe('parseArgs', () => {
     })
   })
 
+  it('rejects an unknown option instead of treating it as a directory', () => {
+    expect(() => parseArgs(['--readonly', '/a'])).toThrow('Unknown option')
+    expect(() => parseArgs(['/a', '--read_only'])).toThrow('--read_only')
+  })
+
   it('treats everything after -- as a directory', () => {
     expect(parseArgs(['--', '--read-only'])).toEqual({
       directories: ['--read-only'],
@@ -243,5 +248,74 @@ describe('shell tool', () => {
       cwd: path.join(dir, 'sub'),
     })
     expect(JSON.parse(text).stdout).toMatch(/sub$/)
+  })
+})
+
+describe('concurrent calls', () => {
+  it('applies parallel edits to different lines of one file without losing any', async () => {
+    const client = await connect(false)
+    const file = path.join(dir, 'parallel.txt')
+    for (let round = 0; round < 10; round++) {
+      await fs.writeFile(file, 'a\nb\nc\nd\n'.repeat(500))
+      const edit = (oldText: string, newText: string) =>
+        client.callTool({
+          name: 'edit_file',
+          arguments: { path: file, edits: [{ oldText, newText }] },
+        })
+      await Promise.all([edit('a\nb', 'A\nB'), edit('c\nd', 'C\nD')])
+      expect(await fs.readFile(file, 'utf-8')).toMatch(/^A\nB\nC\nD\n/)
+    }
+  })
+})
+
+describe('edit_file arguments', () => {
+  it('rejects an empty edits list at the schema and leaves the file alone', async () => {
+    const client = await connect(false)
+    const file = path.join(dir, 'note.txt')
+    const result = await client
+      .callTool({ name: 'edit_file', arguments: { path: file, edits: [] } })
+      .catch(() => ({ isError: true }))
+    expect(result.isError).toBe(true)
+    expect(await fs.readFile(file, 'utf-8')).toBe('original')
+  })
+
+  it('shows the path the client sent in the diff, not the resolved one', async () => {
+    const client = await connect(false)
+    const result = await client.callTool({
+      name: 'edit_file',
+      arguments: {
+        path: 'note.txt',
+        edits: [{ oldText: 'original', newText: 'changed' }],
+        dryRun: true,
+      },
+    })
+    const text = (result.content as Array<{ text: string }>)[0].text
+    expect(text).toContain('--- note.txt')
+    expect(text).not.toContain(dir)
+  })
+})
+
+describe('read_multiple_files budget', () => {
+  it('stops adding files once the combined size budget is used', async () => {
+    const client = await connect(false)
+    const big = 'x'.repeat(6 * 1024 * 1024)
+    await fs.writeFile(path.join(dir, 'one.txt'), big)
+    await fs.writeFile(path.join(dir, 'two.txt'), big)
+    const result = await client.callTool({
+      name: 'read_multiple_files',
+      arguments: {
+        paths: [
+          path.join(dir, 'one.txt'),
+          path.join(dir, 'two.txt'),
+          path.join(dir, 'note.txt'),
+        ],
+      },
+    })
+    const text = (result.content as Array<{ text: string }>)[0].text
+    expect(text).toContain(big.slice(0, 100))
+    expect(text).toContain('two.txt: Error - File is')
+    // a small file that still fits is read after the one that did not
+    expect(text).toContain('note.txt:\noriginal')
+    expect(text.length).toBeLessThan(7 * 1024 * 1024)
   })
 })

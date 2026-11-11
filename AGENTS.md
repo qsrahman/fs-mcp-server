@@ -14,7 +14,7 @@ A stdio MCP server (TypeScript, ESM, Node) exposing four filesystem tools (`read
 - `src/files.ts`: read, head, tail and write.
 - `src/shell.ts`: `runShell` (execa), output truncation.
 - `src/edit.ts`: the `edit_file` engine and its mismatch error.
-- `tests/*.test.ts`: vitest. `lib.test.ts` covers paths, files and edit; `server.test.ts` drives `createServer` through an in-memory MCP client.
+- `tests/*.test.ts`: vitest, one file per `src/` module; `server.test.ts` drives `createServer` through an in-memory MCP client. `helpers.ts` makes the temp directories.
 - `dist/`: build output (`pnpm build`). Never edit by hand.
 
 ## Commands
@@ -26,7 +26,7 @@ Use pnpm (the repo pins it via `devEngines`; plain npm refuses to run).
 - `pnpm test`: run vitest
 - `pnpm format`: prettier (no semicolons, single quotes, trailing commas)
 
-Before finishing a change, run `pnpm typecheck && pnpm test && pnpm format:check`.
+Before finishing a change, run `pnpm validate` (typecheck, test, format check).
 
 ## Conventions
 
@@ -52,5 +52,6 @@ Known gaps (do not claim otherwise in docs): no protection against directory-swa
 ## Gotchas
 
 - `tsconfig.json` has `rootDir: src` so the build emits `dist/index.js`; `tests/` is type-checked only through `tsconfig.test.json`. Do not add `tests` to `tsconfig.json` `include`.
-- Tool calls sent without waiting for earlier responses run concurrently; a read right after a write on the same file can race. This is expected, not a server bug.
+- Tool calls run concurrently. Any tool that reads a file and writes it back must hold `withFileLock(path, ...)` (keyed on the path `validatePath` returned) for the whole read-modify-write, or parallel calls lose updates. Plain reads are not locked, so a read racing a write can see a partly written file.
+- `parseArgs` rejects unknown `--options` on purpose: a mistyped security flag must not fall through as a directory.
 - The server logs to stderr only. stdout is the MCP protocol channel; never `console.log` in server code.
