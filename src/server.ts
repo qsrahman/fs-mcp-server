@@ -1,11 +1,11 @@
-import { readFileSync } from 'node:fs'
+import { readFileSync, realpathSync } from 'node:fs'
 import { McpServer } from '@modelcontextprotocol/server'
 import { z } from 'zod'
 import { applyFileEdits, fileEditSchema } from './edit.js'
 import {
-  MAX_MULTI_READ_BYTES,
-  headFile,
-  readFileContent,
+  MAX_MULTI_READ_CHARS,
+  friendlyFsError,
+  readText,
   tailFile,
   withFileLock,
   writeFileContent,
@@ -31,6 +31,50 @@ const READ_ANNOTATIONS = {
 
 const MAX_READ_PATHS = 50
 
+const pathParam = z
+  .string()
+  .describe('Absolute path, or relative to the first allowed directory.')
+
+/** Run `fn`, naming `shown` (the path as the client wrote it) in any fs error. */
+async function guard<T>(shown: string, fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn()
+  } catch (error) {
+    throw friendlyFsError(error, shown)
+  }
+}
+
+/** What the client reads once, at initialize, before its first tool call. */
+function serverInstructions(
+  allowedDirs: readonly string[],
+  readOnly: boolean,
+  enableShell: boolean,
+): string {
+  // The allowed list holds a directory under both spellings (as given and
+  // realpath'd); show each directory once.
+  const real = (dir: string) => {
+    try {
+      return realpathSync(dir)
+    } catch {
+      return dir
+    }
+  }
+  const dirs = [...new Set(allowedDirs.map(real))]
+  return [
+    `File access is limited to: ${dirs.join(', ')}. Relative paths resolve against ${dirs[0]}.`,
+    '- Read a file before changing it. Long files are returned in parts of about 100,000 characters; use read_file offset and limit to move through one, or head and tail for its ends.',
+    ...(readOnly
+      ? []
+      : [
+          '- Change an existing file with edit_file (small, exact replacements) rather than rewriting it with write_file. Run edit_file with dryRun first when unsure.',
+          '- write_file replaces the whole file and creates missing directories.',
+        ]),
+    ...(enableShell && !readOnly
+      ? ['- The shell tool is not limited to the directories above.']
+      : []),
+  ].join('\n')
+}
+
 export interface ServerOptions {
   /** Serve only tools annotated `readOnlyHint: true`. */
   readOnly?: boolean
@@ -46,7 +90,10 @@ export function createServer(
   allowedDirs: readonly string[],
   { readOnly = false, enableShell = false }: ServerOptions = {},
 ): McpServer {
-  const server = new McpServer({ name: 'fs-mcp-server', version })
+  const server = new McpServer(
+    { name: 'fs-mcp-server', version },
+    { instructions: serverInstructions(allowedDirs, readOnly, enableShell) },
+  )
 
   // Keyed on the annotation, not a list of write tools, so a new tool is
   // withheld unless it declares itself read-only. A withheld tool is removed
@@ -66,39 +113,61 @@ export function createServer(
     {
       title: 'Read File',
       description:
-        'Read the complete contents of a file as text. Use the head parameter ' +
-        'to read only the first N lines, or the tail parameter to read only ' +
-        'the last N lines. Only works within allowed directories.',
+        'Read a text file. Output is capped at about 100,000 characters; when a ' +
+        'file is longer the result ends with the offset to continue from. Use ' +
+        'offset and limit to read a range of lines, head for the first N lines, ' +
+        'or tail for the last N lines (use only one of the three). Only works ' +
+        'within allowed directories.',
       inputSchema: z.object({
-        path: z.string(),
-        tail: z
+        path: pathParam,
+        offset: z
           .number()
           .int()
-          .min(0)
+          .min(1)
           .optional()
-          .describe('If provided, returns only the last N lines of the file'),
+          .describe('Line number to start reading from (1-based).'),
+        limit: z
+          .number()
+          .int()
+          .min(1)
+          .optional()
+          .describe('Most lines to return, counting from offset.'),
         head: z
           .number()
           .int()
           .min(0)
           .optional()
           .describe('If provided, returns only the first N lines of the file'),
+        tail: z
+          .number()
+          .int()
+          .min(0)
+          .optional()
+          .describe('If provided, returns only the last N lines of the file'),
       }),
       annotations: READ_ANNOTATIONS,
     },
     async (args) => {
-      if (args.head !== undefined && args.tail !== undefined) {
+      const ranged = args.offset !== undefined || args.limit !== undefined
+      if (
+        [ranged, args.head !== undefined, args.tail !== undefined].filter(
+          Boolean,
+        ).length > 1
+      ) {
         throw new Error(
-          'Cannot specify both head and tail parameters simultaneously',
+          'Use only one of head, tail, or offset/limit, not a combination',
         )
       }
       const file = await validatePath(args.path, allowedDirs)
       return text(
-        args.tail !== undefined
-          ? await tailFile(file, args.tail)
-          : args.head !== undefined
-            ? await headFile(file, args.head)
-            : await readFileContent(file),
+        await guard(args.path, () =>
+          args.tail !== undefined
+            ? tailFile(file, args.tail)
+            : readText(file, {
+                offset: args.offset,
+                limit: args.head ?? args.limit,
+              }),
+        ),
       )
     },
   )
@@ -110,7 +179,9 @@ export function createServer(
       description:
         "Read the contents of multiple files simultaneously. Each file's " +
         'content is returned with its path as a reference. A failed read of ' +
-        'one file does not stop the others. Only works within allowed directories.',
+        'one file does not stop the others. Output is capped at about 200,000 ' +
+        'characters in total; a file that does not fit is cut, with the offset ' +
+        'to continue from with read_file. Only works within allowed directories.',
       inputSchema: z.object({
         paths: z
           .array(z.string())
@@ -121,15 +192,23 @@ export function createServer(
       annotations: READ_ANNOTATIONS,
     },
     async (args) => {
-      // One at a time, against a shared byte budget, so the response and the
-      // memory held while building it stay bounded.
-      let remaining = MAX_MULTI_READ_BYTES
+      // One at a time, against a shared character budget, so the response and
+      // the memory held while building it stay bounded.
+      let remaining = MAX_MULTI_READ_CHARS
       const results: string[] = []
       for (const filePath of args.paths) {
+        if (remaining <= 0) {
+          results.push(
+            `${filePath}: Skipped - the size limit for this call was reached; read it with read_file`,
+          )
+          continue
+        }
         try {
           const file = await validatePath(filePath, allowedDirs)
-          const content = await readFileContent(file, remaining)
-          remaining -= Buffer.byteLength(content)
+          const content = await guard(filePath, () =>
+            readText(file, { maxChars: remaining }),
+          )
+          remaining -= content.length
           results.push(`${filePath}:\n${content}\n`)
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error)
@@ -145,9 +224,10 @@ export function createServer(
     {
       title: 'Write File',
       description:
-        'Create a new file or completely overwrite an existing file. ' +
-        'Overwrites without warning. Only works within allowed directories.',
-      inputSchema: z.object({ path: z.string(), content: z.string() }),
+        'Create a new file or completely overwrite an existing file, creating ' +
+        'any missing parent directories. Overwrites without warning; to change ' +
+        'part of an existing file use edit_file. Only works within allowed directories.',
+      inputSchema: z.object({ path: pathParam, content: z.string() }),
       annotations: {
         readOnlyHint: false,
         idempotentHint: true,
@@ -157,7 +237,9 @@ export function createServer(
     },
     async (args) => {
       const file = await validatePath(args.path, allowedDirs)
-      await withFileLock(file, () => writeFileContent(file, args.content))
+      await guard(args.path, () =>
+        withFileLock(file, () => writeFileContent(file, args.content)),
+      )
       return text(`Successfully wrote to ${args.path}`)
     },
   )
@@ -168,13 +250,14 @@ export function createServer(
       title: 'Edit File',
       description:
         'Make line-based edits to a text file. Edits apply in order, each ' +
-        'replacing the first match of oldText with newText. oldText must match ' +
-        'exactly, except that line endings and leading/trailing whitespace on ' +
+        'replacing oldText with newText. oldText must match exactly one place ' +
+        '(include enough surrounding lines to be unique), or set replaceAll to ' +
+        'replace every match. Line endings and leading/trailing whitespace on ' +
         'whole lines are ignored when there is no exact match. If any edit has ' +
-        'no match, nothing is written. Returns a git-style diff. Only works ' +
-        'within allowed directories.',
+        'no match or an ambiguous one, nothing is written. Returns a git-style ' +
+        'diff. Only works within allowed directories.',
       inputSchema: z.object({
-        path: z.string(),
+        path: pathParam,
         edits: z.array(fileEditSchema).min(1),
         dryRun: z
           .boolean()
@@ -191,8 +274,10 @@ export function createServer(
     async (args) => {
       const file = await validatePath(args.path, allowedDirs)
       return text(
-        await withFileLock(file, () =>
-          applyFileEdits(file, args.edits, args.dryRun, args.path),
+        await guard(args.path, () =>
+          withFileLock(file, () =>
+            applyFileEdits(file, args.edits, args.dryRun, args.path),
+          ),
         ),
       )
     },

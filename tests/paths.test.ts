@@ -1,7 +1,11 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { validatePath } from '../src/paths.js'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import {
+  FS_CALL_TIMEOUT_MS,
+  validatePath,
+  withFsTimeout,
+} from '../src/paths.js'
 import { makeTempDirs, removeTempDirs } from './helpers.js'
 
 let root: string
@@ -28,9 +32,6 @@ describe('validatePath', () => {
     await expect(validatePath(root + '-evil/x', [root])).rejects.toThrow(
       'Access denied',
     )
-    await expect(
-      validatePath(path.join(root, 'no/such/f'), [root]),
-    ).rejects.toThrow('Parent directory')
   })
 
   it('rejects a symlink that points outside', async () => {
@@ -88,6 +89,34 @@ describe('validatePath edge cases', () => {
     ).toBe(path.join(root, 'x'))
   })
 
+  it('accepts a path several levels below the last existing directory', async () => {
+    expect(
+      await validatePath(path.join(root, 'no/such/dir/f.txt'), [root]),
+    ).toBe(path.join(root, 'no/such/dir/f.txt'))
+  })
+
+  it('resolves the existing part of a new path through symlinks', async () => {
+    await fs.mkdir(path.join(root, 'real'))
+    await fs.symlink(path.join(root, 'real'), path.join(root, 'alias'))
+    expect(
+      await validatePath(path.join(root, 'alias', 'a', 'b.txt'), [root]),
+    ).toBe(path.join(root, 'real', 'a', 'b.txt'))
+  })
+
+  it('refuses a deep new path under a symlink that leaves', async () => {
+    await fs.symlink(outside, path.join(root, 'out'))
+    await expect(
+      validatePath(path.join(root, 'out', 'a', 'b', 'c.txt'), [root]),
+    ).rejects.toThrow('Access denied')
+  })
+
+  it('names a broken symlink in the middle of a path', async () => {
+    await fs.symlink(path.join(root, 'gone'), path.join(root, 'broken'))
+    await expect(
+      validatePath(path.join(root, 'broken', 'sub', 'f.txt'), [root]),
+    ).rejects.toThrow('Broken symlink')
+  })
+
   it('names a broken symlink instead of a generic error', async () => {
     await fs.symlink(
       path.join(root, 'missing-target'),
@@ -96,5 +125,46 @@ describe('validatePath edge cases', () => {
     await expect(
       validatePath(path.join(root, 'dangling'), [root]),
     ).rejects.toThrow('Broken symlink')
+  })
+})
+
+describe('filesystem call timeout', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+    vi.restoreAllMocks()
+  })
+
+  it('rejects a call that never settles, naming the operation and path', async () => {
+    await expect(
+      withFsTimeout(new Promise(() => {}), 'realpath', '/cloud/x', 20),
+    ).rejects.toThrow(
+      /timed out after 20 ms: realpath \/cloud\/x.*cloud-storage/,
+    )
+  })
+
+  it('passes through a value, and a rejection, that arrives in time', async () => {
+    expect(await withFsTimeout(Promise.resolve('ok'), 'stat', '/x', 1000)).toBe(
+      'ok',
+    )
+    await expect(
+      withFsTimeout(Promise.reject(new Error('boom')), 'stat', '/x', 1000),
+    ).rejects.toThrow('boom')
+  })
+
+  it('leaves no timer behind once the call settles', async () => {
+    vi.useFakeTimers()
+    await withFsTimeout(Promise.resolve(1), 'stat', '/x', 1000)
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('makes validatePath fail with a timeout when realpath hangs', async () => {
+    vi.useFakeTimers()
+    vi.spyOn(fs, 'realpath').mockReturnValue(new Promise(() => {}) as never)
+    const outcome = validatePath(path.join(root, 'stuck.txt'), [root]).then(
+      () => 'resolved',
+      (error: Error) => error.message,
+    )
+    await vi.advanceTimersByTimeAsync(FS_CALL_TIMEOUT_MS)
+    expect(await outcome).toContain('timed out after 15000 ms: realpath')
   })
 })

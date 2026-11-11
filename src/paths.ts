@@ -3,6 +3,46 @@ import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
+// A filesystem call on a cloud-storage or network provider can hang while the
+// provider fetches the entry. Without a bound, the agent's request hangs with
+// it. A timeout only stops waiting: Node cannot cancel an fs call in flight, so
+// the stalled call keeps one of libuv's threadpool threads (4 by default) until
+// the provider answers.
+export const FS_CALL_TIMEOUT_MS = 15_000
+
+/** A filesystem call that did not settle within the timeout. */
+export class FsTimeoutError extends Error {
+  constructor(operation: string, target: string, ms: number) {
+    super(
+      `Filesystem call timed out after ${ms} ms: ${operation} ${target}. ` +
+        'The path may be on a cloud-storage or network drive that fetches it on demand; ' +
+        'try again later or use another path.',
+    )
+    this.name = 'FsTimeoutError'
+  }
+}
+
+/** Race `call` against a timer; the losing call is not cancelled (see above). */
+export async function withFsTimeout<T>(
+  call: Promise<T>,
+  operation: string,
+  target: string,
+  ms: number = FS_CALL_TIMEOUT_MS,
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new FsTimeoutError(operation, target, ms)),
+      ms,
+    )
+  })
+  try {
+    return await Promise.race([call, timeout])
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 function expandHome(p: string): string {
   return p === '~' || p.startsWith('~/')
     ? path.join(os.homedir(), p.slice(1))
@@ -21,8 +61,10 @@ function isWithin(target: string, dirs: readonly string[]): boolean {
 /**
  * Resolve `requested` to a real path inside the allowed directories, or throw.
  * Symlinks are resolved first, so a link pointing outside is refused. A path
- * that does not exist yet is accepted if its parent directory is allowed.
- * `allowedDirs` must already be realpath'd (see resolveAllowedDirectories).
+ * that does not exist yet is accepted when its nearest existing ancestor is
+ * allowed: the result is that ancestor's real path plus the missing names, so a
+ * caller can create the missing directories. `allowedDirs` must already be
+ * realpath'd (see resolveAllowedDirectories).
  */
 export async function validatePath(
   requested: string,
@@ -35,37 +77,41 @@ export async function validatePath(
       `Access denied - path outside allowed directories: ${absolute} not in ${allowedDirs.join(', ')}`,
     )
   }
-  try {
-    const real = await fs.realpath(absolute)
-    if (!isWithin(real, allowedDirs)) {
-      throw new Error(
-        `Access denied - symlink target outside allowed directories: ${real}`,
-      )
+
+  // Walk up to the nearest ancestor that exists.
+  const missing: string[] = []
+  let existing = absolute
+  let real: string
+  for (;;) {
+    try {
+      real = await withFsTimeout(fs.realpath(existing), 'realpath', existing)
+      break
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
     }
-    return real
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-  }
-  // ENOENT also means a symlink whose target is missing; writing there would
-  // fail later with a confusing error, so name it now.
-  if ((await fs.lstat(absolute).catch(() => null))?.isSymbolicLink()) {
-    throw new Error(`Broken symlink (its target does not exist): ${absolute}`)
-  }
-  // New file: the parent must exist and be allowed.
-  const parent = path.dirname(absolute)
-  let realParent: string
-  try {
-    realParent = await fs.realpath(parent)
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-      throw new Error(`Parent directory does not exist: ${parent}`)
+    // ENOENT also means a symlink whose target is missing; name it now rather
+    // than fail later with a confusing error.
+    const stats = await withFsTimeout(
+      fs.lstat(existing),
+      'lstat',
+      existing,
+    ).catch((error: unknown) => {
+      if (error instanceof FsTimeoutError) throw error
+      return null
+    })
+    if (stats?.isSymbolicLink()) {
+      throw new Error(`Broken symlink (its target does not exist): ${existing}`)
     }
-    throw error
+    missing.unshift(path.basename(existing))
+    existing = path.dirname(existing)
   }
-  if (!isWithin(realParent, allowedDirs)) {
+
+  if (!isWithin(real, allowedDirs)) {
     throw new Error(
-      `Access denied - parent directory outside allowed directories: ${realParent}`,
+      missing.length === 0
+        ? `Access denied - symlink target outside allowed directories: ${real}`
+        : `Access denied - parent directory outside allowed directories: ${real}`,
     )
   }
-  return path.join(realParent, path.basename(absolute))
+  return path.join(real, ...missing)
 }

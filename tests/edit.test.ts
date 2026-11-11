@@ -151,6 +151,102 @@ describe('edit arguments and output', () => {
     expect(diff).toContain('--- notes/d.txt')
     expect(diff).not.toContain(root)
   })
+
+  it('keeps the diff free of Index, underline and label noise', async () => {
+    const f = path.join(root, 'noise.txt')
+    await fs.writeFile(f, 'one\ntwo\n')
+    const diff = await applyFileEdits(
+      f,
+      [{ oldText: 'two', newText: 'TWO' }],
+      true,
+      'a.txt',
+    )
+    expect(diff).toBe(
+      '```diff\n--- a.txt\n+++ a.txt\n@@ -1,2 +1,2 @@\n one\n-two\n+TWO\n```\n\n',
+    )
+  })
+})
+
+describe('ambiguous matches and replaceAll', () => {
+  const run = async (content: string, edit: object, dryRun = false) => {
+    const f = path.join(root, 'amb.txt')
+    await fs.writeFile(f, content)
+    const outcome = await applyFileEdits(f, [edit as never], dryRun).then(
+      () => 'ok',
+      (error: Error) => error.message,
+    )
+    return { outcome, after: await fs.readFile(f, 'utf-8') }
+  }
+
+  it('refuses an exact oldText that matches more than once, naming the lines', async () => {
+    const { outcome, after } = await run('a=1\nb=1\na=1\n', {
+      oldText: 'a=1',
+      newText: 'a=2',
+    })
+    expect(outcome).toContain('matches 2 places (lines 1, 3)')
+    expect(outcome).toContain('replaceAll')
+    expect(after).toBe('a=1\nb=1\na=1\n')
+  })
+
+  it('lists at most ten lines', async () => {
+    const { outcome } = await run('x\n'.repeat(25), {
+      oldText: 'x',
+      newText: 'y',
+    })
+    expect(outcome).toContain(
+      'matches 25 places (lines 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, ...)',
+    )
+  })
+
+  it('replaces every exact match with replaceAll, literally', async () => {
+    const { outcome, after } = await run('a=1\nb=1\na=1\n', {
+      oldText: 'a=1',
+      newText: '$&a=1$1',
+      replaceAll: true,
+    })
+    expect(outcome).toBe('ok')
+    expect(after).toBe('$&a=1$1\nb=1\n$&a=1$1\n')
+  })
+
+  it('accepts an oldText made unique by surrounding lines', async () => {
+    const { outcome, after } = await run('a=1\nb=1\na=1\n', {
+      oldText: 'b=1\na=1',
+      newText: 'b=1\na=2',
+    })
+    expect(outcome).toBe('ok')
+    expect(after).toBe('a=1\nb=1\na=2\n')
+  })
+
+  it('applies the same rule to whole-line matches that ignore indentation', async () => {
+    const file = 'if (a) {\n    go()\n}\nif (b) {\n        go()\n}\n'
+    const ambiguous = await run(file, {
+      oldText: '\tgo()',
+      newText: '\tstop()',
+    })
+    expect(ambiguous.outcome).toContain('matches 2 places (lines 2, 5)')
+    expect(ambiguous.after).toBe(file)
+    const all = await run(file, {
+      oldText: '\tgo()',
+      newText: '\tstop()',
+      replaceAll: true,
+    })
+    expect(all.outcome).toBe('ok')
+    expect(all.after).toBe(
+      'if (a) {\n    stop()\n}\nif (b) {\n        stop()\n}\n',
+    )
+  })
+
+  it('does not write on dryRun and reports which edit was ambiguous', async () => {
+    const f = path.join(root, 'two.txt')
+    await fs.writeFile(f, 'p\nq\np\n')
+    await expect(
+      applyFileEdits(f, [
+        { oldText: 'q', newText: 'Q' },
+        { oldText: 'p', newText: 'P' },
+      ]),
+    ).rejects.toThrow('Edit 2 of 2')
+    expect(await fs.readFile(f, 'utf-8')).toBe('p\nq\np\n')
+  })
 })
 
 describe('whitespace-tolerant matching and reindenting', () => {

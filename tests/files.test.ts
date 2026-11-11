@@ -2,9 +2,8 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
-  MAX_READ_BYTES,
-  headFile,
-  readFileContent,
+  friendlyFsError,
+  readText,
   tailFile,
   withFileLock,
   writeFileContent,
@@ -27,6 +26,19 @@ describe('writeFileContent', () => {
     await expect(writeFileContent(path.join(root, 'd'), 'x')).rejects.toThrow()
   })
 
+  it('creates missing parent directories', async () => {
+    const f = path.join(root, 'new', 'deep', 'f.txt')
+    await writeFileContent(f, 'hi')
+    expect(await fs.readFile(f, 'utf-8')).toBe('hi')
+  })
+
+  it('fails clearly when a parent is a file', async () => {
+    await fs.writeFile(path.join(root, 'plain'), 'x')
+    await expect(
+      writeFileContent(path.join(root, 'plain', 'child.txt'), 'y'),
+    ).rejects.toThrow()
+  })
+
   it('does not write through a symlink', async () => {
     const target = path.join(outside, 't')
     await fs.writeFile(target, 'keep')
@@ -38,35 +50,116 @@ describe('writeFileContent', () => {
   })
 })
 
-describe('head / tail', () => {
-  it('returns the first and last N lines, and nothing for 0', async () => {
-    const f = path.join(root, 'l.txt')
-    await fs.writeFile(f, 'a\r\nb\r\nc\r\nd\n')
-    expect(await headFile(f, 2)).toBe('a\nb')
-    expect(await tailFile(f, 2)).toBe('c\nd')
-    expect(await headFile(f, 0)).toBe('')
-    expect(await tailFile(f, 0)).toBe('')
-    expect(await tailFile(f, 10)).toBe('a\nb\nc\nd')
+describe('readText', () => {
+  const lines = (n: number) =>
+    Array.from({ length: n }, (_, i) => `line ${i + 1}`)
+  const write = async (name: string, content: string) => {
+    const f = path.join(root, name)
+    await fs.writeFile(f, content)
+    return f
+  }
+
+  it('returns a small file byte for byte', async () => {
+    const f = await write('small.txt', 'a\r\nb\n')
+    expect(await readText(f)).toBe('a\r\nb\n')
   })
 
-  it('head closes its file descriptor on an early exit', async () => {
-    const f = path.join(root, 'big.txt')
-    await fs.writeFile(f, 'x\n'.repeat(200_000))
+  it('reads a range with offset and limit', async () => {
+    const f = await write('range.txt', lines(10).join('\n') + '\n')
+    expect(await readText(f, { offset: 3, limit: 2 })).toMatch(
+      /^line 3\nline 4\n\[\.\.\. showing lines 3-4; more lines follow\. Continue with read_file offset=5\]$/,
+    )
+    expect(await readText(f, { offset: 9 })).toBe('line 9\nline 10')
+    expect(await readText(f, { offset: 11 })).toContain(
+      'past the end of the file, which has 10 lines',
+    )
+  })
+
+  it('returns the first N lines with limit, normalizing CRLF', async () => {
+    const f = await write('l.txt', 'a\r\nb\r\nc\r\nd\n')
+    expect(await readText(f, { limit: 2 })).toMatch(
+      /^a\nb\n\[\.\.\. showing lines 1-2/,
+    )
+    expect(await readText(f, { limit: 4 })).toBe('a\nb\nc\nd')
+  })
+
+  it('cuts a long file at a line boundary and says where to continue', async () => {
+    const f = await write('long.txt', lines(5000).join('\n') + '\n')
+    const text = await readText(f, { maxChars: 1000 })
+    const note = text.match(
+      /\[\.\.\. showing lines 1-(\d+); more lines follow\. Continue with read_file offset=(\d+)\]$/,
+    )
+    expect(note).not.toBeNull()
+    expect(Number(note![2])).toBe(Number(note![1]) + 1)
+    const body = text.slice(0, note!.index).trimEnd()
+    expect(body.length).toBeLessThanOrEqual(1000)
+    expect(body.split('\n')).toEqual(lines(Number(note![1])))
+    // continuing from the note picks up at the next line
+    expect(
+      (await readText(f, { offset: Number(note![2]), limit: 1 })).split(
+        '\n',
+      )[0],
+    ).toBe(`line ${note![2]}`)
+  })
+
+  it('cuts one line that is longer than the whole budget instead of skipping it', async () => {
+    const f = await write('wide.txt', 'x'.repeat(5000) + '\nnext\n')
+    const text = await readText(f, { maxChars: 100 })
+    expect(text.startsWith('x'.repeat(100))).toBe(true)
+    expect(text).toContain('line cut: it has 5000 characters')
+    expect(text).toContain('Continue with read_file offset=2')
+  })
+
+  it('reads a file far past the old whole-file limit by the first part', async () => {
+    const f = path.join(root, 'huge.txt')
+    await fs.writeFile(f, 'a\n'.repeat(6 * 1024 * 1024))
+    const text = await readText(f)
+    expect(text.length).toBeLessThan(101_000)
+    expect(text).toContain('more lines follow')
+  })
+
+  it('closes its file descriptor on an early exit', async () => {
+    const f = await write('big.txt', 'x\n'.repeat(200_000))
     const open = async () => (await fs.readdir('/dev/fd')).length
     const before = await open()
-    for (let i = 0; i < 30; i++) await headFile(f, 1)
+    for (let i = 0; i < 30; i++) await readText(f, { limit: 1 })
     await new Promise((resolve) => setTimeout(resolve, 100))
     expect(await open()).toBeLessThan(before + 5)
   })
+
+  it('refuses a directory and a binary file with recognisable codes', async () => {
+    await fs.mkdir(path.join(root, 'dir'))
+    await expect(readText(path.join(root, 'dir'))).rejects.toMatchObject({
+      code: 'EISDIR',
+    })
+    const bin = path.join(root, 'blob.bin')
+    await fs.writeFile(bin, Buffer.from([0x68, 0x00, 0x69, 0x0a]))
+    await expect(readText(bin)).rejects.toMatchObject({ code: 'EBINARY' })
+    await expect(tailFile(bin, 1)).rejects.toMatchObject({ code: 'EBINARY' })
+  })
+
+  it('refuses text that is not valid UTF-8, such as Latin-1', async () => {
+    const f = path.join(root, 'latin1.txt')
+    await fs.writeFile(f, Buffer.from([0x63, 0x61, 0x66, 0xe9, 0x0a])) // "café" in Latin-1
+    await expect(readText(f)).rejects.toMatchObject({ code: 'EBINARY' })
+  })
+
+  it('accepts UTF-8 whose multi-byte character straddles the 8 KB sniff boundary', async () => {
+    const f = path.join(root, 'edge.txt')
+    await fs.writeFile(f, 'a'.repeat(8191) + 'é€' + 'b'.repeat(500) + '\n')
+    const text = await readText(f, { maxChars: 100 })
+    expect(text).toContain('a'.repeat(50))
+    await expect(readText(f, { offset: 1, limit: 1 })).resolves.toContain('é€')
+  })
 })
 
-describe('read limits and tail', () => {
-  it('refuses a whole-file read over the limit but still serves head and tail', async () => {
-    const f = path.join(root, 'huge.txt')
-    await fs.writeFile(f, 'a\n'.repeat(MAX_READ_BYTES / 2 + 1))
-    await expect(readFileContent(f)).rejects.toThrow('head or tail')
-    expect(await headFile(f, 2)).toBe('a\na')
-    expect(await tailFile(f, 2)).toBe('a\na')
+describe('tailFile', () => {
+  it('returns the last N lines, and nothing for 0', async () => {
+    const f = path.join(root, 'l.txt')
+    await fs.writeFile(f, 'a\r\nb\r\nc\r\nd\n')
+    expect(await tailFile(f, 2)).toBe('c\nd')
+    expect(await tailFile(f, 0)).toBe('')
+    expect(await tailFile(f, 10)).toBe('a\nb\nc\nd')
   })
 
   it('tails across chunk boundaries, with multi-byte text and no final newline', async () => {
@@ -76,16 +169,43 @@ describe('read limits and tail', () => {
     expect(await tailFile(f, 3)).toBe(lines.slice(-3).join('\n'))
     await fs.writeFile(f, lines.join('\n') + '\n')
     expect(await tailFile(f, 3)).toBe(lines.slice(-3).join('\n'))
-    expect(await tailFile(f, 50_000)).toBe(lines.join('\n'))
+    expect(await tailFile(f, 50_000, 10_000_000)).toBe(lines.join('\n'))
+  })
+
+  it('caps a huge tail request at maxChars without reading the whole file', async () => {
+    const f = path.join(root, 'tail-cap.txt')
+    await fs.writeFile(f, 'some log line\n'.repeat(100_000))
+    const text = await tailFile(f, 1_000_000, 500)
+    expect(text).toContain('showing only the last 500 characters')
+    expect(text.length).toBeLessThan(600)
+    expect(text.endsWith('some log line')).toBe(true)
   })
 })
 
-describe('read budget', () => {
-  it('refuses a file over a smaller maxBytes and says how to read part of it', async () => {
-    const f = path.join(root, 'budget.txt')
-    await fs.writeFile(f, 'x'.repeat(100))
-    expect(await readFileContent(f, 100)).toHaveLength(100)
-    await expect(readFileContent(f, 99)).rejects.toThrow('head or tail')
+describe('friendlyFsError', () => {
+  it('names the path as the caller wrote it for common fs failures', () => {
+    const shown = 'src/a.ts'
+    const code = (c: string) => Object.assign(new Error(c), { code: c })
+    expect(friendlyFsError(code('ENOENT'), shown).message).toBe(
+      'File not found: src/a.ts',
+    )
+    expect(friendlyFsError(code('EISDIR'), shown).message).toBe(
+      'src/a.ts is a directory, not a file',
+    )
+    expect(friendlyFsError(code('ENOTDIR'), shown).message).toContain(
+      'not a directory',
+    )
+    expect(friendlyFsError(code('EACCES'), shown).message).toBe(
+      'Permission denied: src/a.ts',
+    )
+    expect(friendlyFsError(code('EBINARY'), shown).message).toContain(
+      'binary file',
+    )
+  })
+
+  it('passes other errors through unchanged', () => {
+    const error = new Error('Access denied - path outside allowed directories')
+    expect(friendlyFsError(error, 'x')).toBe(error)
   })
 })
 

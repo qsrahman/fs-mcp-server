@@ -2,7 +2,7 @@
 // fallback, a git-style diff, and a descriptive error when nothing matches.
 import { isUtf8 } from 'node:buffer'
 import fs from 'node:fs/promises'
-import { createTwoFilesPatch } from 'diff'
+import { FILE_HEADERS_ONLY, createTwoFilesPatch } from 'diff'
 import { z } from 'zod'
 import { normalizeLineEndings, writeFileContent } from './files.js'
 
@@ -13,6 +13,12 @@ export const fileEditSchema = z.object({
     .min(1)
     .describe('Text to search for - must match exactly'),
   newText: z.string().describe('Text to replace with'),
+  replaceAll: z
+    .boolean()
+    .optional()
+    .describe(
+      'Replace every match of oldText. By default oldText must match exactly one place.',
+    ),
 })
 export type FileEdit = z.infer<typeof fileEditSchema>
 
@@ -266,11 +272,47 @@ function describeEditMismatch(
   return parts.join('\n\n')
 }
 
+/** Offsets of the non-overlapping occurrences of `needle` in `text`. */
+function exactMatches(text: string, needle: string): number[] {
+  const found: number[] = []
+  for (
+    let at = text.indexOf(needle);
+    at !== -1;
+    at = text.indexOf(needle, at + needle.length)
+  ) {
+    found.push(at)
+  }
+  return found
+}
+
+/** Start lines of the non-overlapping runs of `file` lines equal to `wanted` once trimmed. */
+function lineMatches(file: string[], wanted: string[]): number[] {
+  const found: number[] = []
+  for (let i = 0; i <= file.length - wanted.length; i++) {
+    if (wanted.every((line, j) => line.trim() === file[i + j].trim())) {
+      found.push(i)
+      i += wanted.length - 1
+    }
+  }
+  return found
+}
+
+function ambiguousEdit(lines: number[], index: number, count: number): Error {
+  const shown =
+    lines.slice(0, 10).join(', ') + (lines.length > 10 ? ', ...' : '')
+  return new Error(
+    `Edit ${index + 1} of ${count}: oldText matches ${lines.length} places (lines ${shown}). ` +
+      'Add surrounding lines to oldText so it matches once, or set replaceAll to true to ' +
+      'replace every match. No edits were applied.',
+  )
+}
+
 /**
- * Apply edits in order, each replacing the first match of oldText. Falls back
- * to matching whole lines ignoring leading/trailing whitespace, in which case
- * the replacement takes the file's indentation. Returns a git-style diff.
- * Nothing is written if any edit fails to match, or when dryRun is set.
+ * Apply edits in order, each replacing the single match of oldText (or every
+ * match with replaceAll). Without an exact match, falls back to matching whole
+ * lines ignoring leading/trailing whitespace, in which case the replacement
+ * takes the file's indentation. Returns a git-style diff. Nothing is written if
+ * any edit has no match or an ambiguous one, or when dryRun is set.
  */
 export async function applyFileEdits(
   filePath: string,
@@ -300,32 +342,48 @@ export async function applyFileEdits(
     const oldText = normalizeLineEndings(edit.oldText)
     const newText = normalizeLineEndings(edit.newText)
 
-    if (modified.includes(oldText)) {
-      modified = modified.replace(oldText, () => newText)
+    const exact = exactMatches(modified, oldText)
+    if (exact.length > 0) {
+      if (exact.length > 1 && !edit.replaceAll) {
+        const lineOf = (at: number) => modified.slice(0, at).split('\n').length
+        throw ambiguousEdit(exact.map(lineOf), index, edits.length)
+      }
+      modified = edit.replaceAll
+        ? modified.split(oldText).join(newText)
+        : modified.replace(oldText, () => newText)
       continue
     }
 
+    // No exact match: match whole lines ignoring leading and trailing whitespace.
     const oldLines = oldText.split('\n')
     const newLines = newText.split('\n')
     const lines = modified.split('\n')
-    let matched = false
-    for (let i = 0; i <= lines.length - oldLines.length; i++) {
-      if (!oldLines.every((l, j) => l.trim() === lines[i + j].trim())) continue
-      const replacement = reindentReplacement(
-        oldLines,
-        newLines,
-        lines.slice(i, i + oldLines.length),
-      )
-      lines.splice(i, oldLines.length, ...replacement)
-      modified = lines.join('\n')
-      matched = true
-      break
-    }
-    if (!matched) {
+    const starts = lineMatches(lines, oldLines)
+    if (starts.length === 0) {
       throw new Error(
         describeEditMismatch(modified, edit.oldText, index, edits.length),
       )
     }
+    if (starts.length > 1 && !edit.replaceAll) {
+      throw ambiguousEdit(
+        starts.map((start) => start + 1),
+        index,
+        edits.length,
+      )
+    }
+    // Last match first, so the line numbers of the earlier ones stay valid.
+    for (const start of (edit.replaceAll
+      ? starts
+      : starts.slice(0, 1)
+    ).reverse()) {
+      const replacement = reindentReplacement(
+        oldLines,
+        newLines,
+        lines.slice(start, start + oldLines.length),
+      )
+      lines.splice(start, oldLines.length, ...replacement)
+    }
+    modified = lines.join('\n')
   }
 
   const diff = createTwoFilesPatch(
@@ -333,8 +391,10 @@ export async function applyFileEdits(
     displayPath,
     original,
     modified,
-    'original',
-    'modified',
+    undefined,
+    undefined,
+    // Just the two file lines: the "Index:" and "====" lines carry nothing.
+    { headerOptions: FILE_HEADERS_ONLY },
   )
 
   if (!dryRun) {
