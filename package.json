@@ -33,6 +33,14 @@
     "claude",
     "llm"
   ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/qsrahman/fs-mcp-server.git"
+  },
+  "homepage": "https://github.com/qsrahman/fs-mcp-server#readme",
+  "bugs": {
+    "url": "https://github.com/qsrahman/fs-mcp-server/issues"
+  },
   "author": "Qazi Sami ur Rahman <qsrahmans@gmail.com>",
   "license": "MIT",
   "devEngines": {
