@@ -4,7 +4,7 @@ Guidance for AI coding agents working in this repo. See [README.md](README.md) f
 
 ## Overview
 
-A stdio MCP server (TypeScript, ESM, Node) exposing four filesystem tools: `read_file`, `read_multiple_files`, `write_file`, `edit_file`. It is a trimmed port of the reference server at `modelcontextprotocol/servers/src/filesystem`.
+A stdio MCP server (TypeScript, ESM, Node) exposing four filesystem tools (`read_file`, `read_multiple_files`, `write_file`, `edit_file`) plus an opt-in `shell` tool (`--enable-shell`, ported from tiny-code). It is a trimmed port of the reference server at `modelcontextprotocol/servers/src/filesystem`.
 
 ## Layout
 
@@ -12,6 +12,7 @@ A stdio MCP server (TypeScript, ESM, Node) exposing four filesystem tools: `read
 - `src/server.ts`: `createServer` and the tool registrations. Handlers stay thin; logic lives in the modules below.
 - `src/paths.ts`: `validatePath`.
 - `src/files.ts`: read, head, tail and write.
+- `src/shell.ts`: `runShell` (execa), output truncation.
 - `src/edit.ts`: the `edit_file` engine and its mismatch error.
 - `tests/*.test.ts`: vitest. `lib.test.ts` covers paths, files and edit; `server.test.ts` drives `createServer` through an in-memory MCP client.
 - `dist/`: build output (`pnpm build`). Never edit by hand.
@@ -30,7 +31,7 @@ Before finishing a change, run `pnpm typecheck && pnpm test && pnpm format:check
 ## Conventions
 
 - Match the existing style; run prettier rather than hand-formatting.
-- Prefer Node built-ins and already-installed deps (`zod`, `diff`, `@modelcontextprotocol/server`) over hand-rolled code.
+- Prefer Node built-ins and already-installed deps (`zod`, `diff`, `execa`, `@modelcontextprotocol/server`) over hand-rolled code.
 - Keep it minimal. Do not add features, abstractions or tools that were not requested.
 - Tool schemas use `zod` objects. Handlers return `{ content: [{type: 'text', text}] }` (no `structuredContent`: it would duplicate the payload) and signal failure by throwing.
 - Read-only mode keys on the `readOnlyHint` annotation. Every tool must set it truthfully; a tool without `readOnlyHint: true` is withheld under `--read-only`.
@@ -43,6 +44,8 @@ Every tool handler must call `validatePath(path, allowedDirs)` before touching t
 - Never write through a symlink: new files use exclusive create (`wx`), existing ones must be regular files and are opened with `O_NOFOLLOW`.
 - Allowed directories are stored both as given and realpath'd (macOS `/var` vs `/private/var`); keep both.
 - Add a test in `tests/` for any change to path validation or write behaviour, including a failing case such as traversal, a sibling directory sharing a prefix, or a symlink.
+
+The `shell` tool is the deliberate exception: only its `cwd` goes through `validatePath`; the command is unconfined. It must stay opt-in (`enableShell`, default off), must keep `readOnlyHint: false` so `--read-only` withholds it, and the README must keep saying it is not sandboxed. Do not describe the server as confining file access when the shell is enabled.
 
 Known gaps (do not claim otherwise in docs): no protection against directory-swap races between validation and write, no Windows/WSL path handling, no case or Unicode path equivalence.
 

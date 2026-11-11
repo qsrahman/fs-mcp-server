@@ -30,20 +30,24 @@ async function resolveAllowedDirectories(args: string[]): Promise<string[]> {
 export function parseArgs(args: string[]) {
   const directories: string[] = []
   let readOnly = false
+  let enableShell = false
   let options = true
   for (const arg of args) {
     if (options && arg === '--') options = false
     else if (options && arg === '--read-only') readOnly = true
+    else if (options && arg === '--enable-shell') enableShell = true
     else directories.push(arg)
   }
-  return { directories, readOnly }
+  return { directories, readOnly, enableShell }
 }
 
 async function main() {
-  const { directories, readOnly } = parseArgs(process.argv.slice(2))
+  const { directories, readOnly, enableShell } = parseArgs(
+    process.argv.slice(2),
+  )
   if (directories.length === 0) {
     console.error(
-      'Usage: fs-mcp-server [--read-only] <allowed-directory> [additional-directories...]',
+      'Usage: fs-mcp-server [--read-only] [--enable-shell] <allowed-directory> [additional-directories...]',
     )
     process.exit(1)
   }
@@ -52,14 +56,14 @@ async function main() {
     console.error('Error: none of the specified directories are accessible')
     process.exit(1)
   }
-  serveStdio(() => createServer(allowedDirs, { readOnly }), {
+  serveStdio(() => createServer(allowedDirs, { readOnly, enableShell }), {
     onerror: (error) => {
       console.error('Transport error:', error)
       process.exitCode = 1
     },
   })
   console.error(
-    `FS MCP Server running on stdio${readOnly ? ' (read-only)' : ''}. Allowed: ${allowedDirs.join(', ')}`,
+    `FS MCP Server running on stdio${readOnly ? ' (read-only)' : ''}${enableShell ? ' (shell enabled)' : ''}. Allowed: ${allowedDirs.join(', ')}`,
   )
 }
 

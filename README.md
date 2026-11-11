@@ -12,6 +12,7 @@ The tools are ported, in trimmed form, from the reference [filesystem server](ht
 | `read_multiple_files` | Read up to 50 files at once. A failure on one file is reported inline and does not stop the others.                                                                 |
 | `write_file`          | Create a file or overwrite it completely.                                                                                                                           |
 | `edit_file`           | Apply ordered `{oldText, newText}` edits and return a git-style diff. `dryRun` previews without writing.                                                            |
+| `shell`               | Run a shell command; returns stdout, stderr and exit code. **Opt-in** with `--enable-shell` (see below). |
 
 ### Edit behaviour
 
@@ -31,6 +32,12 @@ Only paths inside the allowed directories are accessible.
 - `write_file` creates files exclusively and never writes through a symlink. It refuses to overwrite anything that is not a regular file.
 - Each allowed directory is stored both as given and realpath'd (for example macOS `/var` and `/private/var`).
 
+### Shell tool
+
+`shell` is off unless you start the server with `--enable-shell`, and it is never served under `--read-only`. **It is not sandboxed.** Only its starting directory (`cwd`, default: the first allowed directory) is checked against the allowed directories; the command itself can read, write and delete anything the server process can, and can use the network. Enabling it removes the guarantee that file access stays inside the allowed directories. Only enable it for a client and model you trust, ideally in a container or a restricted user account.
+
+Commands run with stdin closed, are killed (with the processes they started) after `timeoutMs` (default 30 s, `0` disables) or when the request is cancelled, and each of stdout and stderr is cut to 20,000 characters (start and end kept). Binary output is replaced by a note. A non-zero exit is returned as a result with `isError` set.
+
 Not covered: a directory being swapped for a symlink between validation and the write (a TOCTOU race), Windows/WSL path handling, and case-insensitive or Unicode-equivalent path matching. Do not treat this as a hardened sandbox.
 
 ## Usage
@@ -40,10 +47,10 @@ Requires Node.js and [pnpm](https://pnpm.io).
 ```bash
 pnpm install
 pnpm build
-node dist/index.js [--read-only] /path/to/dir [/another/dir ...]
+node dist/index.js [--read-only] [--enable-shell] /path/to/dir [/another/dir ...]
 ```
 
-`--read-only` serves only tools annotated `readOnlyHint: true` (`read_file`, `read_multiple_files`); the write tools are absent from `tools/list`. Use `--` to pass a directory literally named `--read-only`.
+`--enable-shell` adds the `shell` tool. `--read-only` serves only tools annotated `readOnlyHint: true` (`read_file`, `read_multiple_files`); the write tools are absent from `tools/list`. Use `--` to pass a directory literally named `--read-only`.
 
 At least one accessible directory is required, otherwise the server exits.
 
@@ -77,6 +84,7 @@ Source layout:
 - `src/server.ts`: `createServer`, the tool registrations (and `--read-only` filtering).
 - `src/paths.ts`: `validatePath`.
 - `src/files.ts`: read, head, tail and write.
+- `src/shell.ts`: command execution for the shell tool (execa).
 - `src/edit.ts`: the `edit_file` engine.
 - `tests/`: vitest tests for the modules above and the server (in-memory MCP client).
 
