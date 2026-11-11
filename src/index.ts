@@ -71,31 +71,40 @@ const USAGE =
   '                     [--ignore-robots-txt] [--allowed-hosts a.com,*.b.org] [allowed-directory...]\n' +
   'With no directories, file access is not restricted to any.'
 
-async function main() {
-  let parsed: ReturnType<typeof parseArgs>
-  try {
-    parsed = parseArgs(process.argv.slice(2))
-  } catch (error) {
-    console.error(`${(error as Error).message}\n${USAGE}`)
-    process.exit(1)
-  }
-  const { directories, readOnly, shell, fetch } = parsed
+/**
+ * Everything the server is started with, from the command line and the
+ * environment. Throws, with a message fit to print, when the arguments are
+ * unusable; `main` turns that into exit code 1.
+ */
+export async function resolveConfig(argv: string[], env: NodeJS.ProcessEnv) {
+  const { directories, readOnly, shell, fetch } = parseArgs(argv)
 
   // No directories means no restriction. Directories that were given but could
-  // not be used must never turn into "no restriction", so that case exits.
+  // not be used must never turn into "no restriction", so that case throws.
   let allowedDirs: string[] | null = null
   if (directories.length > 0) {
     allowedDirs = await resolveAllowedDirectories(directories)
     if (allowedDirs.length === 0) {
-      console.error('Error: none of the specified directories are accessible')
-      process.exit(1)
+      throw new Error('Error: none of the specified directories are accessible')
     }
   }
 
   // The key comes from the environment, not an option, so it never shows up in
   // a process listing. Without one, the web search tools are not offered.
-  const apiKey = process.env.BRAVE_API_KEY?.trim()
+  const apiKey = env.BRAVE_API_KEY?.trim()
   const brave = apiKey ? { apiKey } : undefined
+  return { allowedDirs, readOnly, shell, fetch, brave }
+}
+
+async function main() {
+  let config: Awaited<ReturnType<typeof resolveConfig>>
+  try {
+    config = await resolveConfig(process.argv.slice(2), process.env)
+  } catch (error) {
+    console.error(`${(error as Error).message}\n${USAGE}`)
+    process.exit(1)
+  }
+  const { allowedDirs, readOnly, shell, fetch, brave } = config
 
   serveStdio(
     () => createServer(allowedDirs, { readOnly, shell, brave, fetch }),

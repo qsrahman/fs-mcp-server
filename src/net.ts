@@ -219,7 +219,7 @@ export interface SafeResponse {
 class BodyTooLargeError extends Error {}
 
 /** A connection's lookup, refusing any address the policy does not permit. */
-function checkedLookup(
+export function checkedLookup(
   hostname: string,
   permit: (address: string) => boolean,
 ): net.LookupFunction {

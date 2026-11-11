@@ -3,6 +3,7 @@ import type { AddressInfo } from 'node:net'
 import zlib from 'node:zlib'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import {
+  checkedLookup,
   FetchRefusedError,
   MAX_REDIRECTS,
   MAX_RESPONSE_BYTES,
@@ -419,4 +420,42 @@ describe('safeGet', () => {
       expect(message).toContain('169.254.169.254 is not one of the hosts')
     })
   })
+})
+
+describe('checkedLookup', () => {
+  const lookup = (permit: (address: string) => boolean, all: boolean) =>
+    new Promise<unknown>((resolve) =>
+      checkedLookup('localhost', permit)('localhost', { all }, (...result) =>
+        resolve(result),
+      ),
+    )
+
+  it('answers with a single address when one is asked for', async () => {
+    const [error, address, family] = (await lookup(() => true, false)) as [
+      unknown,
+      string,
+      number,
+    ]
+    expect(error).toBeNull()
+    expect(['127.0.0.1', '::1']).toContain(address)
+    expect([4, 6]).toContain(family)
+  })
+
+  it('answers with every address when all is set', async () => {
+    const [error, addresses] = (await lookup(() => true, true)) as [
+      unknown,
+      { address: string }[],
+    ]
+    expect(error).toBeNull()
+    expect(addresses.length).toBeGreaterThan(0)
+  })
+
+  it.each([true, false])(
+    'refuses a forbidden address (all=%s)',
+    async (all) => {
+      const [error] = (await lookup(() => false, all)) as [Error]
+      expect(error).toBeInstanceOf(FetchRefusedError)
+      expect(error.message).toContain('not a public address')
+    },
+  )
 })

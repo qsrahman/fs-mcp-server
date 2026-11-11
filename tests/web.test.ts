@@ -89,6 +89,12 @@ describe('web fetching', () => {
           'text/html',
           '<html><head><title>App</title></head><body><div id="root"></div><script>render()</script></body></html>',
         )
+      else if (path === '/deep')
+        send(
+          200,
+          'text/html',
+          `<html><body>${'<div>'.repeat(2000)}<p>${lorem}</p></body></html>`,
+        )
       else if (path === '/huge')
         send(
           200,
@@ -198,6 +204,15 @@ describe('web fetching', () => {
       expect(await failure(fetcher().fetch(`${base}/spa`))).toContain(
         'raw=true',
       )
+    })
+
+    it('refuses a deeply nested page quickly instead of blocking on it', async () => {
+      // Readability took about a minute on this 22 KB page before the guard.
+      const started = performance.now()
+      expect(await failure(fetcher().fetch(`${base}/deep`))).toContain(
+        'raw=true',
+      )
+      expect(performance.now() - started).toBeLessThan(2000)
     })
 
     it('cuts a very large page before converting it, and says so', async () => {

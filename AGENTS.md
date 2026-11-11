@@ -8,7 +8,7 @@ A stdio MCP server (TypeScript, ESM, Node) exposing four filesystem tools (`read
 
 ## Layout
 
-- `src/index.ts`: CLI arg parsing (`--read-only`), stdio entry point. `main()` runs only when the file is the process entry point, so importing it (as tests do) starts nothing.
+- `src/index.ts`: CLI arg parsing, `resolveConfig` (argv + env to server options; throws on unusable input, tested in `tests/index.test.ts`), stdio entry point. `main()` runs only when the file is the process entry point, so importing it (as tests do) starts nothing.
 - `src/server.ts`: `createServer` and the tool registrations. Handlers stay thin; logic lives in the modules below.
 - `src/paths.ts`: `validatePath`.
 - `src/files.ts`: `readText` (offset/limit, capped), `tailFile`, `writeFileContent` (creates parent dirs), `withFileLock`, `friendlyFsError`.
@@ -83,6 +83,8 @@ Known gaps (do not claim otherwise in docs): no protection against directory-swa
 - The package is scoped (`@qsrahman/workshop-mcp`); the command it installs is `workshop-mcp`, so `npx -y @qsrahman/workshop-mcp` works because the package has a single `bin`. `publishConfig.access` is `public`, which a first publish of a scoped package needs. Keep `server.ts`'s `serverInfo.name` (`workshop-mcp`) as the display name; it is not the npm name.
 - History: this was first published as `@qsrahman/fs-mcp-server` (0.1.0 and 0.2.0) and renamed when the web tools arrived, because the name no longer described it. That package is deprecated, and its trusted-publisher entry on npmjs.com is obsolete (it names the old repository). Do not reuse the old name.
 - The `bin` entry works through npm's symlink because `index.ts` compares real paths before running `main()`. Keep that guard.
+
+`.github/workflows/ci.yml` runs `pnpm validate` and the build on pushes to `main` and on pull requests (Node 22 and 24).
 
 ### Releasing (GitHub Actions)
 

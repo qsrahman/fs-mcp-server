@@ -108,6 +108,15 @@ describe('tools', () => {
     expect(result.isError).toBe(true)
   })
 
+  it('rejects head: 0 instead of returning a "continue" note for nothing', async () => {
+    const client = await connect(false)
+    const result = await client.callTool({
+      name: 'read_file',
+      arguments: { path: path.join(dir, 'note.txt'), head: 0 },
+    })
+    expect(result.isError).toBe(true)
+  })
+
   it('rejects head and tail together', async () => {
     const client = await connect(false)
     const result = await client.callTool({
@@ -1065,6 +1074,24 @@ describe('the fetch_url tool', () => {
     expect(await names(await connectTo(null, { fetch: false }))).not.toContain(
       'fetch_url',
     )
+  })
+
+  it('describes the network policy it actually runs with', async () => {
+    const describe = async (fetch: object) =>
+      (await (await connectTo(null, { fetch })).listTools()).tools.find(
+        (t) => t.name === 'fetch_url',
+      )?.description
+    const strict = await describe({})
+    expect(strict).toContain('Private and local addresses are refused.')
+    expect(strict).toContain('robots.txt is obeyed.')
+    const loose = await describe({
+      allowPrivateIps: true,
+      ignoreRobotsTxt: true,
+      allowedHosts: ['example.com'],
+    })
+    expect(loose).toContain('Private and local addresses are allowed.')
+    expect(loose).toContain('robots.txt is not consulted.')
+    expect(loose).toContain('Only these hosts may be fetched: example.com.')
   })
 
   it('fetches a page as markdown through the MCP interface', async () => {

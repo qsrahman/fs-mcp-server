@@ -32,6 +32,11 @@ export const MAX_MAX_LENGTH = 100_000
 // Parsing and extracting run on the main thread and take about 0.4 s for a
 // 1 MB page, so the HTML that is converted is capped; a larger page is cut.
 const MAX_EXTRACT_HTML_CHARS = 1_500_000
+// Readability's cost grows steeply with nesting depth (a 6 KB page nested 500
+// deep blocks the process for over a second, 22 KB at 2000 deep for about a
+// minute), and conversion runs on the main thread. Real pages nest well under
+// 100 levels, so a deeper page is not converted.
+const MAX_DOM_DEPTH = 256
 const CACHE_TTL_MS = 5 * 60_000
 const CACHE_ENTRIES = 5
 
@@ -149,6 +154,24 @@ const normalizedWords = (text: string) =>
     .replace(/[^\p{L}\p{N}]+/gu, ' ')
     .trim()
 
+interface TreeNode {
+  firstChild: TreeNode | null
+  nextSibling: TreeNode | null
+}
+
+/** True when the tree nests deeper than `limit`; counted without recursion. */
+function nestsDeeperThan(root: TreeNode, limit: number): boolean {
+  const stack: [TreeNode, number][] = [[root, 0]]
+  for (let item = stack.pop(); item; item = stack.pop()) {
+    const [node, depth] = item
+    if (depth > limit) return true
+    for (let child = node.firstChild; child; child = child.nextSibling) {
+      stack.push([child, depth + 1])
+    }
+  }
+  return false
+}
+
 /**
  * The main content of an HTML page as markdown. Heavy libraries are loaded the
  * first time they are needed, so a server that never fetches a page does not
@@ -178,6 +201,11 @@ export async function htmlToMarkdown(
   if (!document.documentElement) {
     throw new FetchFailure(
       `${pageUrl} has no readable content; it does not look like an HTML page. Try raw=true.`,
+    )
+  }
+  if (nestsDeeperThan(document, MAX_DOM_DEPTH)) {
+    throw new FetchFailure(
+      `${pageUrl} nests its HTML more than ${MAX_DOM_DEPTH} levels deep, which is too slow to convert. Try raw=true for its source.`,
     )
   }
   // Readability makes links absolute against the document's base; without one
