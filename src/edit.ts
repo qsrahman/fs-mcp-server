@@ -349,7 +349,7 @@ export async function applyFileEdits(
         throw ambiguousEdit(exact.map(lineOf), index, edits.length)
       }
       modified = edit.replaceAll
-        ? modified.split(oldText).join(newText)
+        ? modified.replaceAll(oldText, () => newText)
         : modified.replace(oldText, () => newText)
       continue
     }

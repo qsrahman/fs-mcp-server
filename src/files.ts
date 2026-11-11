@@ -1,7 +1,6 @@
 // Reads and writes of single files. Callers pass paths from validatePath.
-import fs from 'node:fs/promises'
-import { isUtf8 } from 'node:buffer'
-import { constants, createReadStream } from 'node:fs'
+import fs, { type FileHandle } from 'node:fs/promises'
+import { constants } from 'node:fs'
 import path from 'node:path'
 import { createInterface } from 'node:readline'
 
@@ -43,32 +42,42 @@ export function friendlyFsError(error: unknown, shown: string): Error {
 
 /**
  * Whether the start of a file looks like UTF-8 text: no NUL bytes and valid
- * UTF-8. A start cut off mid-file may end inside a multi-byte character, so up
- * to three trailing bytes are allowed to be incomplete.
+ * UTF-8. A start cut off mid-file may end inside a multi-byte character; the
+ * decoder in streaming mode treats that as incomplete, not invalid.
  */
 function looksLikeText(start: Buffer, wholeFile: boolean): boolean {
   if (start.includes(0)) return false
-  if (isUtf8(start)) return true
-  return (
-    !wholeFile &&
-    [1, 2, 3].some((cut) => isUtf8(start.subarray(0, start.length - cut)))
-  )
+  try {
+    new TextDecoder('utf-8', { fatal: true }).decode(start, {
+      stream: !wholeFile,
+    })
+    return true
+  } catch {
+    return false
+  }
 }
 
-/** Throw EISDIR for a directory and EBINARY for a file that does not look like UTF-8 text. */
-async function assertTextFile(filePath: string): Promise<{ size: number }> {
+/**
+ * Open a file once for reading, refusing a directory (EISDIR) and a file that
+ * does not look like UTF-8 text (EBINARY). The caller reads through the handle,
+ * so the file checked is the file read, and closes it.
+ */
+async function openTextFile(
+  filePath: string,
+): Promise<{ handle: FileHandle; size: number }> {
   const handle = await fs.open(filePath, 'r')
   try {
     const stats = await handle.stat()
     if (stats.isDirectory()) throw codedError('EISDIR')
     const sniff = Buffer.alloc(Math.min(BINARY_SNIFF_BYTES, stats.size))
-    await handle.read(sniff, 0, sniff.length, 0)
+    await handle.read(sniff, 0, sniff.length, 0) // positional: the file offset stays at 0
     if (!looksLikeText(sniff, sniff.length === stats.size)) {
       throw codedError('EBINARY')
     }
-    return { size: stats.size }
-  } finally {
+    return { handle, size: stats.size }
+  } catch (error) {
     await handle.close()
+    throw error
   }
 }
 
@@ -92,49 +101,54 @@ export async function readText(
   filePath: string,
   { offset = 1, limit = Infinity, maxChars = MAX_READ_CHARS }: ReadOptions = {},
 ): Promise<string> {
-  const { size } = await assertTextFile(filePath)
-  if (offset === 1 && limit === Infinity && size <= maxChars) {
-    return fs.readFile(filePath, 'utf-8')
-  }
-
-  const input = createReadStream(filePath, 'utf-8')
-  const rl = createInterface({ input, crlfDelay: Infinity })
-  const lines: string[] = []
-  let chars = 0
-  let lineNumber = 0
-  let nextOffset: number | undefined
+  const { handle, size } = await openTextFile(filePath)
   try {
-    for await (const line of rl) {
-      lineNumber++
-      if (lineNumber < offset) continue
-      if (
-        lines.length >= limit ||
-        (lines.length > 0 && chars + line.length + 1 > maxChars)
-      ) {
-        nextOffset = lineNumber
-        break
-      }
-      // A single line longer than the whole budget is cut, not skipped.
-      const shown =
-        line.length > maxChars
-          ? `${line.slice(0, maxChars)} [... line cut: it has ${line.length} characters]`
-          : line
-      lines.push(shown)
-      chars += shown.length + 1
+    if (offset === 1 && limit === Infinity && size <= maxChars) {
+      return await handle.readFile('utf-8')
     }
-  } finally {
-    rl.close()
-    // rl.close() leaves the stream (and its file descriptor) open on an early exit.
-    input.destroy()
-  }
 
-  if (lines.length === 0 && nextOffset === undefined && offset > 1) {
-    return `[offset ${offset} is past the end of the file, which has ${lineNumber} lines]`
+    const input = handle.createReadStream({ encoding: 'utf-8' })
+    const rl = createInterface({ input, crlfDelay: Infinity })
+    const lines: string[] = []
+    let chars = 0
+    let lineNumber = 0
+    let nextOffset: number | undefined
+    try {
+      for await (const line of rl) {
+        lineNumber++
+        if (lineNumber < offset) continue
+        if (
+          lines.length >= limit ||
+          (lines.length > 0 && chars + line.length + 1 > maxChars)
+        ) {
+          nextOffset = lineNumber
+          break
+        }
+        // A single line longer than the whole budget is cut, not skipped.
+        const shown =
+          line.length > maxChars
+            ? `${line.slice(0, maxChars)} [... line cut: it has ${line.length} characters]`
+            : line
+        lines.push(shown)
+        chars += shown.length + 1
+      }
+    } finally {
+      rl.close()
+      // rl.close() leaves the stream open on an early exit; destroying it
+      // stops the pending read before the handle is closed below.
+      input.destroy()
+    }
+
+    if (lines.length === 0 && nextOffset === undefined && offset > 1) {
+      return `[offset ${offset} is past the end of the file, which has ${lineNumber} lines]`
+    }
+    const text = lines.join('\n')
+    return nextOffset === undefined
+      ? text
+      : `${text}\n[... showing lines ${offset}-${nextOffset - 1}; more lines follow. Continue with read_file offset=${nextOffset}]`
+  } finally {
+    await handle.close()
   }
-  const text = lines.join('\n')
-  return nextOffset === undefined
-    ? text
-    : `${text}\n[... showing lines ${offset}-${nextOffset - 1}; more lines follow. Continue with read_file offset=${nextOffset}]`
 }
 
 /** The last `n` lines of a file (line endings become LF), capped at maxChars. */
@@ -144,23 +158,22 @@ export async function tailFile(
   maxChars = MAX_READ_CHARS,
 ): Promise<string> {
   if (n === 0) return '' // slice(-0) would return every line
-  await assertTextFile(filePath)
-  const handle = await fs.open(filePath, 'r')
+  const { handle, size } = await openTextFile(filePath)
   try {
     // Read backwards in chunks until n + 1 newlines are in hand (n lines plus
     // the break before the first of them; a final newline ends a line, so it
     // is not one of the n), or until more bytes than the cap could use.
-    let position = (await handle.stat()).size
+    let position = size
     const chunks: Buffer[] = []
     let newlines = 0
     let bytes = 0
     while (position > 0 && newlines <= n && bytes < maxChars * 4) {
-      const size = Math.min(TAIL_CHUNK_BYTES, position)
-      position -= size
-      const chunk = Buffer.alloc(size)
-      await handle.read(chunk, 0, size, position)
+      const length = Math.min(TAIL_CHUNK_BYTES, position)
+      position -= length
+      const chunk = Buffer.alloc(length)
+      await handle.read(chunk, 0, length, position)
       chunks.unshift(chunk)
-      bytes += size
+      bytes += length
       for (const byte of chunk) if (byte === 0x0a) newlines++
     }
     const text = normalizeLineEndings(

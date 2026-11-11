@@ -31,6 +31,7 @@ Before finishing a change, run `pnpm validate` (typecheck, test, format check).
 ## Conventions
 
 - Match the existing style; run prettier rather than hand-formatting.
+- Built-ins already in use: `util.parseArgs`, `util.stripVTControlCharacters`, `buffer.isUtf8`, `TextDecoder`, `FileHandle` (each file is opened once per read), `String.replaceAll`, `timers/promises` (in tests). Use stable APIs only: `engines` is `>=22`, so avoid `import.meta.main` (22.18+, "early development"), `worker_threads.locks` (24.5+, experimental) and `util.diff` (experimental, no unified-diff output).
 - Prefer Node built-ins and already-installed deps (`zod`, `diff`, `execa`, `@modelcontextprotocol/server`) over hand-rolled code.
 - Keep it minimal. Do not add features, abstractions or tools that were not requested.
 - Tool schemas use `zod` objects. Handlers return `{ content: [{type: 'text', text}] }` (no `structuredContent`: it would duplicate the payload) and signal failure by throwing.

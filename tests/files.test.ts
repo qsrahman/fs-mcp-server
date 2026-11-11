@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { setTimeout as sleep } from 'node:timers/promises'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   friendlyFsError,
   readText,
@@ -118,12 +119,25 @@ describe('readText', () => {
     expect(text).toContain('more lines follow')
   })
 
+  it('opens a file once and closes that handle, whichever way it reads', async () => {
+    const f = await write('once.txt', lines(3000).join('\n') + '\n')
+    const open = vi.spyOn(fs, 'open')
+    try {
+      await readText(f) // whole file (fits)
+      await readText(f, { maxChars: 500 }) // streamed
+      await tailFile(f, 5)
+      expect(open).toHaveBeenCalledTimes(3)
+    } finally {
+      open.mockRestore()
+    }
+  })
+
   it('closes its file descriptor on an early exit', async () => {
     const f = await write('big.txt', 'x\n'.repeat(200_000))
     const open = async () => (await fs.readdir('/dev/fd')).length
     const before = await open()
     for (let i = 0; i < 30; i++) await readText(f, { limit: 1 })
-    await new Promise((resolve) => setTimeout(resolve, 100))
+    await sleep(100)
     expect(await open()).toBeLessThan(before + 5)
   })
 
@@ -210,9 +224,6 @@ describe('friendlyFsError', () => {
 })
 
 describe('withFileLock', () => {
-  const sleep = (ms: number) =>
-    new Promise((resolve) => setTimeout(resolve, ms))
-
   it('runs calls with the same key one after another, in order', async () => {
     const events: string[] = []
     const task = (name: string, ms: number) =>

@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
+import { setTimeout as sleep } from 'node:timers/promises'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { runShell } from '../src/shell.js'
 
@@ -96,8 +97,7 @@ describe('timeouts', () => {
         return false
       }
     }
-    for (let i = 0; i < 20 && alive(); i++)
-      await new Promise((r) => setTimeout(r, 50))
+    for (let i = 0; i < 20 && alive(); i++) await sleep(50)
     expect(alive()).toBe(false)
   })
 
