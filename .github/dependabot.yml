@@ -1,0 +1,19 @@
+# Weekly pull requests for out-of-date dependencies and for the SHA-pinned
+# GitHub Actions (which also update the version comment next to each SHA).
+# Updates are grouped so a week's worth arrives as one PR to review.
+version: 2
+updates:
+  - package-ecosystem: npm # also reads pnpm-lock.yaml
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      npm-dependencies:
+        patterns: ['*']
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      github-actions:
+        patterns: ['*']
