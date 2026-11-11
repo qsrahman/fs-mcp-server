@@ -1,7 +1,7 @@
 {
   "name": "@qsrahman/fs-mcp-server",
   "version": "0.1.0",
-  "description": "MCP server for reading, writing and editing files and running shell commands, with switches to restrict it.",
+  "description": "MCP server for reading, writing and editing files, running shell commands and (with a Brave API key) searching the web, with switches to restrict it.",
   "main": "dist/index.js",
   "bin": {
     "fs-mcp-server": "dist/index.js"
@@ -23,7 +23,8 @@
     "dist",
     "!dist/**/*.map",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md"
   ],
   "publishConfig": {
     "access": "public"
@@ -34,7 +35,9 @@
     "filesystem",
     "files",
     "claude",
-    "llm"
+    "llm",
+    "brave-search",
+    "web-search"
   ],
   "repository": {
     "type": "git",

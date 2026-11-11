@@ -1,3 +1,5 @@
+// Adapted from modelcontextprotocol/servers (src/filesystem) and changed; see
+// THIRD_PARTY_NOTICES.md for its licence.
 // The edit_file engine: ordered text replacements with a whitespace-tolerant
 // fallback, a git-style diff, and a descriptive error when nothing matches.
 import { isUtf8 } from 'node:buffer'

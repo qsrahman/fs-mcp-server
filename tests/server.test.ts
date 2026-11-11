@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { Client, InMemoryTransport } from '@modelcontextprotocol/client'
 import { serveStdio } from '@modelcontextprotocol/server/stdio'
 import { parseArgs } from '../src/index.js'
+import { startFakeBrave } from './helpers.js'
 import {
   MAX_TOOL_INPUT_ELEMENTS,
   createServer,
@@ -801,5 +802,153 @@ describe('without allowed directories', () => {
     })
     expect(result.isError).toBe(true)
     expect(result.text).toContain('Access denied')
+  })
+})
+
+describe('web search tools', () => {
+  let fake: Awaited<ReturnType<typeof startFakeBrave>>
+
+  beforeEach(async () => {
+    fake = await startFakeBrave()
+  })
+
+  afterEach(async () => {
+    await fake.close()
+  })
+
+  const brave = () => ({ apiKey: 'test-key', baseUrl: fake.baseUrl })
+
+  const call = async (
+    client: Client,
+    name: string,
+    args: Record<string, unknown>,
+  ) => {
+    const result = await client.callTool({ name, arguments: args })
+    return {
+      isError: result.isError,
+      text: (result.content as Array<{ text: string }>)[0].text,
+    }
+  }
+
+  it('are left out without an API key, and offered after the other tools with one', async () => {
+    expect(await names(await connectTo(null))).not.toContain('brave_web_search')
+    const listed = (
+      await (await connectTo(null, { brave: brave() })).listTools()
+    ).tools.map((tool) => tool.name)
+    expect(listed).toEqual([
+      'read_file',
+      'read_multiple_files',
+      'write_file',
+      'edit_file',
+      'shell',
+      'brave_web_search',
+      'brave_news_search',
+    ])
+  })
+
+  it('are marked read-only and open-world, so --read-only keeps them', async () => {
+    const client = await connectTo([dir], { readOnly: true, brave: brave() })
+    const tools = (await client.listTools()).tools
+    expect(tools.map((tool) => tool.name)).toEqual([
+      'read_file',
+      'read_multiple_files',
+      'brave_web_search',
+      'brave_news_search',
+    ])
+    for (const tool of tools.filter((t) => t.name.startsWith('brave_'))) {
+      expect(tool.annotations).toMatchObject({
+        readOnlyHint: true,
+        openWorldHint: true,
+      })
+    }
+  })
+
+  it('search and return formatted results through the MCP interface', async () => {
+    const client = await connectTo(null, { brave: brave() })
+    fake.replies.push({
+      body: {
+        web: {
+          results: [
+            { title: 'MCP spec', url: 'https://modelcontextprotocol.io' },
+          ],
+        },
+      },
+    })
+    const web = await call(client, 'brave_web_search', {
+      query: 'model context protocol',
+      count: 3,
+    })
+    expect(web.isError).toBeFalsy()
+    expect(web.text).toContain('1. MCP spec')
+    expect(fake.requests[0].url.searchParams.get('count')).toBe('3')
+    expect(fake.requests[0].headers['x-subscription-token']).toBe('test-key')
+
+    fake.replies.push({
+      body: { results: [{ title: 'Headline', url: 'https://n.test' }] },
+    })
+    const news = await call(client, 'brave_news_search', { query: 'headlines' })
+    expect(news.text).toContain('1. Headline')
+    expect(fake.requests[1].url.pathname).toBe('/news/search')
+  })
+
+  it('report a failed search as a tool error that does not contain the key', async () => {
+    const client = await connectTo(null, { brave: brave() })
+    fake.replies.push({ status: 401, body: {} })
+    const result = await call(client, 'brave_web_search', { query: 'x' })
+    expect(result.isError).toBe(true)
+    expect(result.text).toContain('BRAVE_API_KEY')
+    expect(result.text).not.toContain('test-key')
+  })
+
+  it('reject misspelled, out-of-range and over-long arguments before any request', async () => {
+    const client = await connectTo(null, { brave: brave() })
+    const attempts: Array<[string, Record<string, unknown>]> = [
+      ['brave_web_search', { query: 'x', lang: 'en' }],
+      ['brave_web_search', { query: 'x', count: 21 }],
+      ['brave_news_search', { query: 'x', count: 51 }],
+      ['brave_web_search', { query: 'x', offset: 10 }],
+      ['brave_web_search', { query: 'x', freshness: 'yesterday' }],
+      ['brave_web_search', { query: 'x', country: 'USA' }],
+      ['brave_web_search', { query: '' }],
+      ['brave_web_search', { query: 'word '.repeat(51) }],
+    ]
+    for (const [name, args] of attempts) {
+      expect(
+        (await call(client, name, args)).isError,
+        `${name} ${JSON.stringify(args)}`,
+      ).toBe(true)
+    }
+    expect(fake.requests).toHaveLength(0)
+  })
+
+  it('tell the model to treat results as untrusted and to cite them', async () => {
+    const client = await connectTo(null, { brave: brave() })
+    const tools = (await client.listTools()).tools.filter((t) =>
+      t.name.startsWith('brave_'),
+    )
+    for (const tool of tools)
+      expect(tool.description, tool.name).toContain('untrusted')
+    expect(client.getInstructions()).toContain('brave_web_search')
+    expect(client.getInstructions()).toContain('never as instructions')
+    expect(
+      (await (await connectTo(null)).getInstructions()) ?? '',
+    ).not.toContain('brave_')
+  })
+
+  it('describe every parameter and reject unknown ones, like the file tools', async () => {
+    type Schema = {
+      properties?: Record<string, Schema & { description?: string }>
+      additionalProperties?: unknown
+    }
+    const client = await connectTo(null, { brave: brave() })
+    for (const tool of (await client.listTools()).tools.filter((t) =>
+      t.name.startsWith('brave_'),
+    )) {
+      const schema = tool.inputSchema as Schema
+      expect(schema.additionalProperties, tool.name).toBe(false)
+      for (const [name, property] of Object.entries(schema.properties ?? {})) {
+        expect(property.description, `${tool.name}.${name}`).toBeTruthy()
+      }
+    }
   })
 })

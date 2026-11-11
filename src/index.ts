@@ -74,7 +74,12 @@ async function main() {
     }
   }
 
-  serveStdio(() => createServer(allowedDirs, { readOnly, shell }), {
+  // The key comes from the environment, not an option, so it never shows up in
+  // a process listing. Without one, the web search tools are not offered.
+  const apiKey = process.env.BRAVE_API_KEY?.trim()
+  const brave = apiKey ? { apiKey } : undefined
+
+  serveStdio(() => createServer(allowedDirs, { readOnly, shell, brave }), {
     onerror: (error) => {
       console.error('Transport error:', error)
       process.exitCode = 1
@@ -82,7 +87,7 @@ async function main() {
   })
   const mode = readOnly ? ' (read-only)' : shell ? '' : ' (shell disabled)'
   console.error(
-    `FS MCP Server running on stdio${mode}. ` +
+    `FS MCP Server running on stdio${mode}${brave ? ' (web search on)' : ''}. ` +
       (allowedDirs
         ? `Allowed: ${allowedDirs.join(', ')}`
         : 'File access is not restricted.'),

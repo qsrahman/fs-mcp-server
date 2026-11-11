@@ -4,7 +4,7 @@ A small [Model Context Protocol](https://modelcontextprotocol.io) server that gi
 
 **By default it is not restricted to any directory and the shell is on.** Turn things off with `--no-shell` and `--read-only`, or limit file access by listing directories. See [Security model](#security-model) before pointing it at a model you do not fully trust.
 
-The tools are ported, in trimmed form, from the reference [filesystem server](https://github.com/modelcontextprotocol/servers/tree/main/src/filesystem).
+The file tools are ported, in trimmed form, from the reference [filesystem server](https://github.com/modelcontextprotocol/servers/tree/main/src/filesystem), and the optional web search tools from the [Brave Search MCP server](https://github.com/brave/brave-search-mcp-server). See [License](#license).
 
 ## Tools
 
@@ -15,10 +15,21 @@ The tools are ported, in trimmed form, from the reference [filesystem server](ht
 | `write_file`          | Create a file or overwrite it completely, creating any missing parent directories.                                                                                                                                                                                                                                                  |
 | `edit_file`           | Apply ordered `{oldText, newText}` edits and return a git-style diff. Each `oldText` must match exactly one place unless `replaceAll` is set. `dryRun` previews without writing.                                                                                                                                                    |
 | `shell`               | Run a shell command; returns stdout, stderr and exit code. On by default; turn it off with `--no-shell` (see below).                                                                                                                                                                                                                |
+| `brave_web_search`    | Search the web with Brave Search; returns a numbered list of results (title, source, age, URL, description). **Only offered when `BRAVE_API_KEY` is set** (see Web search).                                                                                                                                                         |
+| `brave_news_search`   | Search news articles with Brave Search; the same list format, with the source and breaking-news marker. Offered under the same condition.                                                                                                                                                                                           |
 
 ### For agents
 
 The server sends MCP `instructions` when a client connects: whether file access is limited to directories, how relative paths resolve, and advice to read before editing, to prefer `edit_file` over `write_file`, and to use `offset` and `limit` on long files. Errors name the path as the client wrote it (`File not found: src/a.ts`, `src is a directory, not a file`). Tool inputs are strict: an unknown or misspelled argument (for example `start_line` for `offset`) is an error that names it, not something silently ignored. Every parameter has a description. The tool list never changes while the server runs, so it is announced with `listChanged: false`, and a client on the 2026-07-28 protocol revision may cache it for five minutes. A call whose arguments hold more than 5,000 array elements and object members combined (about 1,600 edits) is rejected before it runs; string contents such as a file's text do not count.
+
+### Web search (optional)
+
+`brave_web_search` and `brave_news_search` search the web through the [Brave Search API](https://brave.com/search/api/). They are offered only when the `BRAVE_API_KEY` environment variable is set, so without a key nothing changes. Create a key in the [Brave Search API dashboard](https://api-dashboard.search.brave.com/app/keys) and give it to the server through your client's `env` setting (examples below), not on the command line, where it would show in process listings.
+
+- Both take a `query` and, optionally, `count`, `offset` (pages), `freshness` (`pd`, `pw`, `pm`, `py`, or a date range), `country`, `search_lang` and `safesearch`. Results come back as a short numbered list to keep them cheap in tokens. Snippets are requested without highlight markup.
+- The results are third-party web text. The tool descriptions and server instructions tell the model to treat them as information, never as instructions, and to cite URLs, but a prompt injection in a page remains a risk while the shell and file-writing tools are on. If that matters, start the server with `--no-shell` or `--read-only`. Searching changes nothing locally, so `--read-only` keeps these two tools.
+- The key is removed from the environment of the `shell` tool, so commands the model runs cannot print it. With the default unrestricted file access, though, the model can read any file you can, including a client config file that contains the key. List directories and use `--no-shell` if the key must stay out of reach (see Security model).
+- Brave's free plan allows about one request per second. A rate-limit answer that resets within five seconds is waited out and retried once; a longer one, such as a used-up monthly quota, is reported as an error that says when it resets. Your search queries go to Brave.
 
 ### Edit behaviour
 
@@ -54,11 +65,15 @@ When directories are listed, only paths inside them are accessible to the file t
 
 With or without directories, `write_file` creates files exclusively and never writes through a symlink, and refuses to overwrite anything that is not a regular file. Relative paths resolve against the first allowed directory, or against the server's working directory when there are none.
 
+### Web search
+
+The two search tools send queries to Brave and return web text the model then reads. The text is untrusted, so a page can try to steer the model. The server tells the model not to follow it, which is a mitigation, not a boundary; what limits the damage is what the model is allowed to do next (`--no-shell`, `--read-only`, directories). The API key is held only in the server's memory and the `X-Subscription-Token` header of the request to Brave; it is never returned by a tool and is removed from the shell's environment.
+
 ### Shell tool
 
 `shell` is on by default. `--no-shell` removes it, and `--read-only` never serves it. **It is not sandboxed:** the command can read, write and delete anything the server process can, and can use the network. Its starting directory (`cwd`) defaults to the first allowed directory, or the server's working directory when there are none; with directories listed, `cwd` must be inside them, but the command itself is not confined.
 
-Commands run with stdin closed, are killed (with the processes they started) after `timeoutMs` (default 30 s, `0` disables) or when the request is cancelled, and each of stdout and stderr is cut to 20,000 characters (start and end kept). Terminal escape sequences are stripped and binary output is replaced by a note. A non-zero exit is returned as a result with `isError` set.
+Commands run with stdin closed, are killed (with the processes they started) after `timeoutMs` (default 30 s, `0` disables) or when the request is cancelled, and each of stdout and stderr is cut to 20,000 characters (start and end kept). Terminal escape sequences are stripped and binary output is replaced by a note. A non-zero exit is returned as a result with `isError` set. The `BRAVE_API_KEY` environment variable is not passed to commands.
 
 ### Limits of the checks
 
@@ -183,6 +198,26 @@ Put this in `.vscode/mcp.json` in your workspace, or in your user profile's `mcp
 }
 ```
 
+#### Enabling web search
+
+Add the key to the server's environment. For Claude Code, put another option between `--env` and the name:
+
+```bash
+claude mcp add --env BRAVE_API_KEY=YOUR_KEY --transport stdio fs -- npx -y @qsrahman/fs-mcp-server
+```
+
+For Claude Desktop and Cursor, add an `env` object to the server entry:
+
+```json
+"fs": {
+  "command": "npx",
+  "args": ["-y", "@qsrahman/fs-mcp-server"],
+  "env": { "BRAVE_API_KEY": "YOUR_KEY" }
+}
+```
+
+Keep the key out of anything you commit; `.mcp.json` and Cursor's project `mcp.json` are normally committed.
+
 #### From a source checkout
 
 To run your own build, after `pnpm install && pnpm build`, replace the command in any of the configs above with Node and the built entry point:
@@ -224,4 +259,4 @@ Source layout:
 
 ## License
 
-MIT
+MIT (see `LICENSE`). Parts are adapted from [modelcontextprotocol/servers](https://github.com/modelcontextprotocol/servers) (the file tools) and [brave/brave-search-mcp-server](https://github.com/brave/brave-search-mcp-server) (the web search tools), under their own licences; see `THIRD_PARTY_NOTICES.md`.

@@ -1,3 +1,5 @@
+// Adapted from modelcontextprotocol/servers (src/filesystem) and changed; see
+// THIRD_PARTY_NOTICES.md for its licence.
 // Reads and writes of single files. Callers pass paths from validatePath.
 import fs, { type FileHandle } from 'node:fs/promises'
 import { constants } from 'node:fs'

@@ -46,6 +46,10 @@ export async function runShell(
     cancelSignal: signal,
     maxBuffer: MAX_BUFFER_CHARS,
     reject: false,
+    // Inherit the environment except the Brave Search key: a command the model
+    // runs (or one a prompt injection in a web page or file talks it into)
+    // could otherwise print or send the key anywhere.
+    env: { BRAVE_API_KEY: undefined },
     // commands that read stdin would otherwise hang until the timeout
     stdin: 'ignore',
     // without this a timed-out shell's children keep the output pipe open and block us

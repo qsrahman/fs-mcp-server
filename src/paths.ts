@@ -1,3 +1,5 @@
+// Adapted from modelcontextprotocol/servers (src/filesystem) and changed; see
+// THIRD_PARTY_NOTICES.md for its licence.
 // Path validation: every tool resolves its path through validatePath.
 import fs from 'node:fs/promises'
 import os from 'node:os'

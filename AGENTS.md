@@ -14,6 +14,8 @@ A stdio MCP server (TypeScript, ESM, Node) exposing four filesystem tools (`read
 - `src/files.ts`: `readText` (offset/limit, capped), `tailFile`, `writeFileContent` (creates parent dirs), `withFileLock`, `friendlyFsError`.
 - `src/shell.ts`: `runShell` (execa), output truncation.
 - `src/edit.ts`: the `edit_file` engine and its mismatch error.
+- `src/brave.ts`: Brave Search client and result formatting for `brave_web_search` / `brave_news_search` (adapted from brave/brave-search-mcp-server).
+- `THIRD_PARTY_NOTICES.md`: licences of the code adapted from other projects; it ships in the npm package.
 - `tests/*.test.ts`: vitest, one file per `src/` module; `server.test.ts` drives `createServer` through an in-memory MCP client. `helpers.ts` makes the temp directories.
 - `dist/`: build output (`pnpm build`). Never edit by hand.
 
@@ -40,6 +42,9 @@ Before finishing a change, run `pnpm validate` (typecheck, test, format check).
 - Tool schemas use `zod` objects. Handlers return `{ content: [{type: 'text', text}] }` (no `structuredContent`: it would duplicate the payload) and signal failure by throwing.
 - Reads are capped for the model's context (`MAX_READ_CHARS`, `MAX_MULTI_READ_CHARS` in `files.ts`), not for memory: a cut result must end with the offset to continue from. New file-touching handlers should wrap their fs calls in `guard(path, ...)` so errors name the path as the client wrote it.
 - `edit_file` fails on an ambiguous `oldText` unless `replaceAll` is set. Keep that: a silent wrong-place edit is the worst agent failure.
+- The Brave tools exist only when `createServer` gets a `brave` option, which `index.ts` builds from the `BRAVE_API_KEY` environment variable (never from a command-line option, which would show in process listings). Never log the key, put it in a URL, or return it in a tool result or error; `brave.test.ts` and `server.test.ts` check this. `runShell` removes `BRAVE_API_KEY` from the shell's environment (`shell.test.ts` pins it): keep that, and do the same for any future secret the server holds.
+- Search results are untrusted web text. Keep the "untrusted" wording in the tool descriptions and the server instructions, and keep the tools to a minimal parameter set: each parameter and enum costs tokens in every conversation.
+- When adapting code from another project, check its licence first, add an "adapted from" line to the file, and add the licence to `THIRD_PARTY_NOTICES.md`. The modelcontextprotocol/servers repository is mid-way from MIT to Apache-2.0, so its whole licence file is reproduced there.
 - Read-only mode keys on the `readOnlyHint` annotation. Every tool must set it truthfully; a tool without `readOnlyHint: true` is withheld under `--read-only`.
 
 ## Security invariants

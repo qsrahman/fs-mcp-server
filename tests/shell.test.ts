@@ -2,7 +2,7 @@ import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { runShell } from '../src/shell.js'
 
 let dir: string
@@ -73,6 +73,22 @@ describe('runShell', () => {
     const result = await pending
     expect(result.ok).toBe(false)
     expect(Date.now() - start).toBeLessThan(5000)
+  })
+})
+
+describe('environment', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs()
+  })
+
+  it('hides BRAVE_API_KEY from commands but keeps the rest of the environment', async () => {
+    vi.stubEnv('BRAVE_API_KEY', 'sk-test-secret')
+    vi.stubEnv('FS_MCP_TEST_VAR', 'kept')
+    const result = await run(
+      'printf "key=[%s] other=[%s]" "$BRAVE_API_KEY" "$FS_MCP_TEST_VAR"; env | grep -c sk-test-secret',
+    )
+    expect(result.stdout).toMatch(/^key=\[\] other=\[kept\]/)
+    expect(result.stdout).not.toContain('sk-test-secret')
   })
 })
 
