@@ -1,5 +1,6 @@
 // Runs a shell command for the shell tool. Ported from tiny-code's shell tool.
 // The command itself is NOT confined to the allowed directories; see README.
+import { stripVTControlCharacters } from 'node:util'
 import { execa } from 'execa'
 
 export const DEFAULT_TIMEOUT_MS = 30_000
@@ -19,8 +20,10 @@ export interface CommandResult {
 // Output is bounded so it can't flood the context window. Binary output (cat on
 // an image) is junk to the model and costs 6 bytes per NUL once JSON-escaped, so
 // it becomes a note. Oversized text keeps its head and tail: a command's start
-// and its failure, usually at the end, both matter.
-export function outputText(text: string): string {
+// and its failure, usually at the end, both matter. Terminal escape sequences
+// (colors, cursor moves) are stripped: they are noise to a model and cost tokens.
+export function outputText(raw: string): string {
+  const text = stripVTControlCharacters(raw)
   if (text.includes('\0')) {
     return `[binary output omitted: ${text.length} characters containing NUL bytes; inspect it with shell, for example: file <path> or xxd <path> | head]`
   }

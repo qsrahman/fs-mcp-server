@@ -158,6 +158,14 @@ describe('output limits', () => {
     expect(JSON.stringify(result).length).toBeLessThan(1000)
   })
 
+  it('strips terminal escape sequences from stdout and stderr', async () => {
+    const result = await run(
+      "printf '\\033[31mred\\033[0m \\033[1;32mgreen\\033[0m'; printf '\\033[2Kerr' >&2",
+    )
+    expect(result.stdout).toBe('red green')
+    expect(result.stderr).toBe('err')
+  })
+
   it('leaves ordinary output alone', async () => {
     expect((await run("printf 'plain text\\n'")).stdout).toBe('plain text')
   })

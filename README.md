@@ -37,7 +37,7 @@ Only paths inside the allowed directories are accessible.
 
 `shell` is off unless you start the server with `--enable-shell`, and it is never served under `--read-only`. **It is not sandboxed.** Only its starting directory (`cwd`, default: the first allowed directory) is checked against the allowed directories; the command itself can read, write and delete anything the server process can, and can use the network. Enabling it removes the guarantee that file access stays inside the allowed directories. Only enable it for a client and model you trust, ideally in a container or a restricted user account.
 
-Commands run with stdin closed, are killed (with the processes they started) after `timeoutMs` (default 30 s, `0` disables) or when the request is cancelled, and each of stdout and stderr is cut to 20,000 characters (start and end kept). Binary output is replaced by a note. A non-zero exit is returned as a result with `isError` set.
+Commands run with stdin closed, are killed (with the processes they started) after `timeoutMs` (default 30 s, `0` disables) or when the request is cancelled, and each of stdout and stderr is cut to 20,000 characters (start and end kept). Terminal escape sequences are stripped and binary output is replaced by a note. A non-zero exit is returned as a result with `isError` set.
 
 Not covered: a directory being swapped for a symlink between validation and the write (a TOCTOU race), Windows/WSL path handling, and case-insensitive or Unicode-equivalent path matching. Do not treat this as a hardened sandbox.
 
@@ -51,7 +51,7 @@ pnpm build
 node dist/index.js [--read-only] [--enable-shell] /path/to/dir [/another/dir ...]
 ```
 
-`--enable-shell` adds the `shell` tool. `--read-only` serves only tools annotated `readOnlyHint: true` (`read_file`, `read_multiple_files`); the write tools are absent from `tools/list`. An unrecognised `--option` is an error (a mistyped `--read-only` would otherwise start the server writable). Use `--` to pass a directory that starts with `--`.
+`--enable-shell` adds the `shell` tool. `--read-only` serves only tools annotated `readOnlyHint: true` (`read_file`, `read_multiple_files`); the write tools are absent from `tools/list`. An unrecognised option is an error (a mistyped `--read-only` would otherwise start the server writable). Use `--` to pass a directory that starts with `--`.
 
 At least one accessible directory is required, otherwise the server exits.
 

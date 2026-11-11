@@ -53,5 +53,5 @@ Known gaps (do not claim otherwise in docs): no protection against directory-swa
 
 - `tsconfig.json` has `rootDir: src` so the build emits `dist/index.js`; `tests/` is type-checked only through `tsconfig.test.json`. Do not add `tests` to `tsconfig.json` `include`.
 - Tool calls run concurrently. Any tool that reads a file and writes it back must hold `withFileLock(path, ...)` (keyed on the path `validatePath` returned) for the whole read-modify-write, or parallel calls lose updates. Plain reads are not locked, so a read racing a write can see a partly written file.
-- `parseArgs` rejects unknown `--options` on purpose: a mistyped security flag must not fall through as a directory.
+- `parseArgs` wraps `util.parseArgs` in strict mode on purpose: an unknown option must throw, because a mistyped security flag must not fall through as a directory. Do not switch `strict` off.
 - The server logs to stderr only. stdout is the MCP protocol channel; never `console.log` in server code.

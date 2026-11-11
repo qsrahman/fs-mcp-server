@@ -1,5 +1,6 @@
 // The edit_file engine: ordered text replacements with a whitespace-tolerant
 // fallback, a git-style diff, and a descriptive error when nothing matches.
+import { isUtf8 } from 'node:buffer'
 import fs from 'node:fs/promises'
 import { createTwoFilesPatch } from 'diff'
 import { z } from 'zod'
@@ -283,7 +284,7 @@ export async function applyFileEdits(
   const raw = bytes.toString('utf-8')
   // Decoding replaces invalid bytes with U+FFFD, and writing back would make
   // that permanent.
-  if (!Buffer.from(raw, 'utf-8').equals(bytes)) {
+  if (!isUtf8(bytes)) {
     throw new Error(`Refusing to edit: not valid UTF-8 text: ${filePath}`)
   }
   if (edits.length === 0) throw new Error('edits must not be empty')

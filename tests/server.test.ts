@@ -151,6 +151,7 @@ describe('parseArgs', () => {
   it('rejects an unknown option instead of treating it as a directory', () => {
     expect(() => parseArgs(['--readonly', '/a'])).toThrow('Unknown option')
     expect(() => parseArgs(['/a', '--read_only'])).toThrow('--read_only')
+    expect(() => parseArgs(['-x', '/a'])).toThrow('-x')
   })
 
   it('treats everything after -- as a directory', () => {

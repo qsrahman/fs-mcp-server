@@ -4,6 +4,7 @@ import { realpathSync } from 'node:fs'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { parseArgs as parseNodeArgs } from 'node:util'
 import { serveStdio } from '@modelcontextprotocol/server/stdio'
 import { createServer } from './server.js'
 
@@ -28,23 +29,23 @@ async function resolveAllowedDirectories(args: string[]): Promise<string[]> {
 }
 
 export function parseArgs(args: string[]) {
-  const directories: string[] = []
-  let readOnly = false
-  let enableShell = false
-  let options = true
-  for (const arg of args) {
-    if (options && arg === '--') options = false
-    else if (options && arg === '--read-only') readOnly = true
-    else if (options && arg === '--enable-shell') enableShell = true
-    // A mistyped flag must not fall through as a directory: a typo in
-    // --read-only would silently start the server writable.
-    else if (options && arg.startsWith('--')) {
-      throw new Error(
-        `Unknown option: ${arg} (use -- before a directory that starts with --)`,
-      )
-    } else directories.push(arg)
+  // strict makes an unknown option throw instead of becoming a directory: a
+  // mistyped --read-only must not start the server writable. `--` still ends
+  // the options, so a directory that starts with -- can follow it.
+  const { values, positionals } = parseNodeArgs({
+    args,
+    allowPositionals: true,
+    strict: true,
+    options: {
+      'read-only': { type: 'boolean', default: false },
+      'enable-shell': { type: 'boolean', default: false },
+    },
+  })
+  return {
+    directories: positionals,
+    readOnly: values['read-only'],
+    enableShell: values['enable-shell'],
   }
-  return { directories, readOnly, enableShell }
 }
 
 const USAGE =
