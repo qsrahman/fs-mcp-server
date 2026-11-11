@@ -2,6 +2,15 @@
 
 Versions follow [semver](https://semver.org). Each release's notes on GitHub are taken from the matching section here, and a release tag fails to publish without one.
 
+## [0.3.3] - 2026-11-11
+
+No change to the server. This release exercises the new release pipeline.
+
+### Added
+
+- This changelog. Each GitHub release now carries the notes of its version, and a release tag fails to publish without a section here.
+- After publishing, the release workflow installs the published version from npm, checks its signatures and provenance, and starts it.
+
 ## [0.3.2] - 2026-11-11
 
 ### Changed
