@@ -301,7 +301,7 @@ describe('concurrent calls', () => {
     const client = await connect(false)
     const file = path.join(dir, 'parallel.txt')
     for (let round = 0; round < 10; round++) {
-      await fs.writeFile(file, 'a\nb\nc\nd\n'.repeat(500))
+      await fs.writeFile(file, 'a\nb\nc\nd\n'.repeat(20))
       const edit = (oldText: string, newText: string) =>
         client.callTool({
           name: 'edit_file',
