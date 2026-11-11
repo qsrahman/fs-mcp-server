@@ -291,20 +291,27 @@ async function readBody(
 
   const chunks: Buffer[] = []
   let total = 0
-  await pipeline(
-    response,
-    ...decoders,
-    // Counts decoded bytes, so a small body that inflates enormously is stopped
-    // too: throwing here destroys the whole chain, decoder included.
-    async (source: AsyncIterable<Buffer>) => {
-      for await (const chunk of source) {
-        total += chunk.length
-        if (total > maxBytes) throw new BodyTooLargeError()
-        chunks.push(chunk)
-      }
-    },
-    { signal },
-  )
+  try {
+    await pipeline(
+      response,
+      ...decoders,
+      // Counts decoded bytes, so a small body that inflates enormously is stopped
+      // too: throwing here destroys the whole chain, decoder included.
+      async (source: AsyncIterable<Buffer>) => {
+        for await (const chunk of source) {
+          total += chunk.length
+          if (total > maxBytes) throw new BodyTooLargeError()
+          chunks.push(chunk)
+        }
+      },
+      { signal },
+    )
+  } catch (error) {
+    // On Node 22 the teardown that follows the throw above can surface as an
+    // AbortError instead; the byte count says what really happened.
+    if (total > maxBytes) throw new BodyTooLargeError()
+    throw error
+  }
   return Buffer.concat(chunks)
 }
 
