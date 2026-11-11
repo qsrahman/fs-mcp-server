@@ -217,8 +217,8 @@ export async function withFileLock<T>(
  * Create or overwrite a file, creating any missing parent directories.
  * Exclusive creation never writes through a symlink; an existing entry must be
  * a regular file, opened with O_NOFOLLOW. The directories are made below the
- * nearest existing ancestor that validatePath already checked, so they stay
- * inside the allowed directories.
+ * nearest existing ancestor that validatePath already checked, so with allowed
+ * directories they stay inside them.
  */
 export async function writeFileContent(
   filePath: string,

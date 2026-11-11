@@ -59,20 +59,26 @@ function isWithin(target: string, dirs: readonly string[]): boolean {
 }
 
 /**
- * Resolve `requested` to a real path inside the allowed directories, or throw.
- * Symlinks are resolved first, so a link pointing outside is refused. A path
+ * Resolve `requested` to a real path, or throw. With allowed directories, the
+ * path must be inside them: symlinks are resolved first, so a link pointing
+ * outside is refused. With `null` there is no restriction, and relative paths
+ * resolve against the working directory. (`null`, not an empty list: a server
+ * whose directories all failed to open must refuse everything, not allow it.) A path
  * that does not exist yet is accepted when its nearest existing ancestor is
  * allowed: the result is that ancestor's real path plus the missing names, so a
- * caller can create the missing directories. `allowedDirs` must already be
+ * caller can create the missing directories. Non-null `allowedDirs` must already be
  * realpath'd (see resolveAllowedDirectories).
  */
 export async function validatePath(
   requested: string,
-  allowedDirs: readonly string[],
+  allowedDirs: readonly string[] | null,
 ): Promise<string> {
   if (requested.includes('\0')) throw new Error('Access denied - invalid path')
-  const absolute = path.resolve(allowedDirs[0] ?? '/', expandHome(requested))
-  if (!isWithin(absolute, allowedDirs)) {
+  const absolute = path.resolve(
+    allowedDirs?.[0] ?? process.cwd(),
+    expandHome(requested),
+  )
+  if (allowedDirs && !isWithin(absolute, allowedDirs)) {
     throw new Error(
       `Access denied - path outside allowed directories: ${absolute} not in ${allowedDirs.join(', ')}`,
     )
@@ -106,7 +112,7 @@ export async function validatePath(
     existing = path.dirname(existing)
   }
 
-  if (!isWithin(real, allowedDirs)) {
+  if (allowedDirs && !isWithin(real, allowedDirs)) {
     throw new Error(
       missing.length === 0
         ? `Access denied - symlink target outside allowed directories: ${real}`

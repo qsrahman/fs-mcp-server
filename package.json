@@ -1,7 +1,7 @@
 {
   "name": "fs-mcp-server",
   "version": "0.1.0",
-  "description": "MCP server for reading, writing and editing files inside chosen directories, with an optional shell tool.",
+  "description": "MCP server for reading, writing and editing files and running shell commands, with switches to restrict it.",
   "main": "dist/index.js",
   "bin": {
     "fs-mcp-server": "dist/index.js"

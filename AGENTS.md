@@ -4,7 +4,7 @@ Guidance for AI coding agents working in this repo. See [README.md](README.md) f
 
 ## Overview
 
-A stdio MCP server (TypeScript, ESM, Node) exposing four filesystem tools (`read_file`, `read_multiple_files`, `write_file`, `edit_file`) plus an opt-in `shell` tool (`--enable-shell`, ported from tiny-code). It is a trimmed port of the reference server at `modelcontextprotocol/servers/src/filesystem`.
+A stdio MCP server (TypeScript, ESM, Node) exposing four filesystem tools (`read_file`, `read_multiple_files`, `write_file`, `edit_file`) plus a `shell` tool (ported from tiny-code). **By default it is unrestricted and the shell is on**; `--no-shell`, `--read-only` and optional directories take access away. It is a trimmed port of the reference server at `modelcontextprotocol/servers/src/filesystem`.
 
 ## Layout
 
@@ -44,15 +44,17 @@ Before finishing a change, run `pnpm validate` (typecheck, test, format check).
 
 ## Security invariants
 
-Every tool handler must call `validatePath(path, allowedDirs)` before touching the filesystem, and use the path it returns. When changing the `src/` modules:
+Every tool handler must call `validatePath(path, allowedDirs)` before touching the filesystem, and use the path it returns. `allowedDirs` is `null` when no directories were given (nothing is restricted) and a non-empty array otherwise. When changing the `src/` modules:
 
-- Never skip the realpath check; symlinks pointing outside the allowed directories must be refused.
+- **`null` and `[]` are different.** `null` means unrestricted; an empty list means nothing is allowed. Directories that were given but could not be opened must make `main()` exit; never turn that into `null`. Keep the tests that pin this (`paths.test.ts`, `server.test.ts`).
+
+- When directories are given, never skip the realpath check; symlinks pointing outside the allowed directories must be refused.
 - `validatePath` returns the nearest existing ancestor's real path plus the missing names; `writeFileContent` creates those directories. Do not create directories from any other path than one `validatePath` returned.
 - Never write through a symlink: new files use exclusive create (`wx`), existing ones must be regular files and are opened with `O_NOFOLLOW`.
 - Allowed directories are stored both as given and realpath'd (macOS `/var` vs `/private/var`); keep both.
 - Add a test in `tests/` for any change to path validation or write behaviour, including a failing case such as traversal, a sibling directory sharing a prefix, or a symlink.
 
-The `shell` tool is the deliberate exception: only its `cwd` goes through `validatePath`; the command is unconfined. It must stay opt-in (`enableShell`, default off), must keep `readOnlyHint: false` so `--read-only` withholds it, and the README must keep saying it is not sandboxed. Do not describe the server as confining file access when the shell is enabled.
+The `shell` tool is unconfined by design, with or without directories: when directories are given only its `cwd` goes through `validatePath`; the command can touch anything. It is **on by default** (`ServerOptions.shell` defaults to true, `--no-shell` turns it off), must keep `readOnlyHint: false` so `--read-only` withholds it, and the README must keep saying plainly that the server has no sandbox by default and that directories alone are not a boundary while the shell is on. Descriptions and instructions are worded per configuration (restricted or not); do not hard-code "allowed directories" into text that is shown when there are none.
 
 `validatePath` bounds its `realpath` and `lstat` calls with `withFsTimeout` (15 s). That only stops *waiting*; Node cannot cancel an fs call, so a stalled one keeps a libuv thread until the provider answers. Do not add timeouts around reads and writes of file contents: a slow cloud download is legitimate.
 
@@ -68,5 +70,5 @@ Known gaps (do not claim otherwise in docs): no protection against directory-swa
 
 - `tsconfig.json` has `rootDir: src` so the build emits `dist/index.js`; `tests/` is type-checked only through `tsconfig.test.json`. Do not add `tests` to `tsconfig.json` `include`.
 - Tool calls run concurrently. Any tool that reads a file and writes it back must hold `withFileLock(path, ...)` (keyed on the path `validatePath` returned) for the whole read-modify-write, or parallel calls lose updates. Plain reads are not locked, so a read racing a write can see a partly written file.
-- `parseArgs` wraps `util.parseArgs` in strict mode on purpose: an unknown option must throw, because a mistyped security flag must not fall through as a directory. Do not switch `strict` off.
+- `parseArgs` wraps `util.parseArgs` in strict mode on purpose: an unknown option must throw, because a mistyped security flag (`--read-only`, `--no-shell`) must not fall through as a directory and start the server with more access than asked for. Do not switch `strict` off.
 - The server logs to stderr only. stdout is the MCP protocol channel; never `console.log` in server code.

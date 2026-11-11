@@ -37,10 +37,6 @@ const MAX_READ_PATHS = 50
 // roughly 1,600 edits in one call, far more than a model sends.
 export const MAX_TOOL_INPUT_ELEMENTS = 5_000
 
-const pathParam = z
-  .string()
-  .describe('Absolute path, or relative to the first allowed directory.')
-
 /** Run `fn`, naming `shown` (the path as the client wrote it) in any fs error. */
 async function guard<T>(shown: string, fn: () => Promise<T>): Promise<T> {
   try {
@@ -52,9 +48,9 @@ async function guard<T>(shown: string, fn: () => Promise<T>): Promise<T> {
 
 /** What the client reads once, at initialize, before its first tool call. */
 function serverInstructions(
-  allowedDirs: readonly string[],
+  allowedDirs: readonly string[] | null,
   readOnly: boolean,
-  enableShell: boolean,
+  shell: boolean,
 ): string {
   // The allowed list holds a directory under both spellings (as given and
   // realpath'd); show each directory once.
@@ -65,9 +61,11 @@ function serverInstructions(
       return dir
     }
   }
-  const dirs = [...new Set(allowedDirs.map(real))]
+  const dirs = allowedDirs && [...new Set(allowedDirs.map(real))]
   return [
-    `File access is limited to: ${dirs.join(', ')}. Relative paths resolve against ${dirs[0]}.`,
+    dirs
+      ? `File access is limited to: ${dirs.join(', ')}. Relative paths resolve against ${dirs[0]}.`
+      : `File access is not restricted to particular directories. Relative paths resolve against ${process.cwd()}.`,
     '- Read a file before changing it. Long files are returned in parts of about 100,000 characters; use read_file offset and limit to move through one, or head and tail for its ends.',
     ...(readOnly
       ? []
@@ -75,31 +73,49 @@ function serverInstructions(
           '- Change an existing file with edit_file (small, exact replacements) rather than rewriting it with write_file. Run edit_file with dryRun first when unsure.',
           '- write_file replaces the whole file and creates missing directories.',
         ]),
-    ...(enableShell && !readOnly
-      ? ['- The shell tool is not limited to the directories above.']
+    ...(shell && !readOnly
+      ? [
+          dirs
+            ? '- The shell tool is not limited to the directories above.'
+            : '- The shell tool runs commands with the same access as this server. Do not use it for file edits the file tools can do, or for destructive commands the user did not ask for.',
+        ]
       : []),
   ].join('\n')
 }
 
 export interface ServerOptions {
-  /** Serve only tools annotated `readOnlyHint: true`. */
+  /** Serve only tools annotated `readOnlyHint: true` (so no shell either). */
   readOnly?: boolean
   /**
-   * Register the shell tool. Off by default: a command can read and write
-   * anywhere the server process can, so it is not confined to the allowed
-   * directories.
+   * Register the shell tool. On by default. A command can read and write
+   * anywhere the server process can, whatever the allowed directories are.
    */
-  enableShell?: boolean
+  shell?: boolean
 }
 
+/**
+ * `allowedDirs` limits the file tools (and the shell's starting directory) to
+ * those directories; `null` limits nothing.
+ */
 export function createServer(
-  allowedDirs: readonly string[],
-  { readOnly = false, enableShell = false }: ServerOptions = {},
+  allowedDirs: readonly string[] | null,
+  { readOnly = false, shell = true }: ServerOptions = {},
 ): McpServer {
+  const pathParam = z
+    .string()
+    .describe(
+      allowedDirs
+        ? 'Absolute path, or relative to the first allowed directory.'
+        : "Absolute path, or relative to the server's working directory.",
+    )
+  const onlyWithin = allowedDirs
+    ? ' Only works within allowed directories.'
+    : ''
+
   const server = new McpServer(
     { name: 'fs-mcp-server', version },
     {
-      instructions: serverInstructions(allowedDirs, readOnly, enableShell),
+      instructions: serverInstructions(allowedDirs, readOnly, shell),
       // The tool list is fixed for the life of the process, so never announce
       // changes (clients may open a notification stream for them) and let a
       // 2026-07-28 client reuse the list for a few minutes. `private`: a
@@ -131,8 +147,8 @@ export function createServer(
         'Read a text file. Output is capped at about 100,000 characters; when a ' +
         'file is longer the result ends with the offset to continue from. Use ' +
         'offset and limit to read a range of lines, head for the first N lines, ' +
-        'or tail for the last N lines (use only one of the three). Only works ' +
-        'within allowed directories.',
+        'or tail for the last N lines (use only one of the three).' +
+        onlyWithin,
       inputSchema: z.strictObject({
         path: pathParam,
         offset: z
@@ -196,7 +212,8 @@ export function createServer(
         'content is returned with its path as a reference. A failed read of ' +
         'one file does not stop the others. Output is capped at about 200,000 ' +
         'characters in total; a file that does not fit is cut, with the offset ' +
-        'to continue from with read_file. Only works within allowed directories.',
+        'to continue from with read_file.' +
+        onlyWithin,
       inputSchema: z.strictObject({
         paths: z
           .array(z.string())
@@ -241,7 +258,8 @@ export function createServer(
       description:
         'Create a new file or completely overwrite an existing file, creating ' +
         'any missing parent directories. Overwrites without warning; to change ' +
-        'part of an existing file use edit_file. Only works within allowed directories.',
+        'part of an existing file use edit_file.' +
+        onlyWithin,
       inputSchema: z.strictObject({
         path: pathParam,
         content: z
@@ -275,7 +293,8 @@ export function createServer(
         'replace every match. Line endings and leading/trailing whitespace on ' +
         'whole lines are ignored when there is no exact match. If any edit has ' +
         'no match or an ambiguous one, nothing is written. Returns a git-style ' +
-        'diff. Only works within allowed directories.',
+        'diff.' +
+        onlyWithin,
       inputSchema: z.strictObject({
         path: pathParam,
         edits: z
@@ -308,7 +327,7 @@ export function createServer(
     },
   )
 
-  if (enableShell) {
+  if (shell) {
     registerTool(
       'shell',
       {
@@ -320,8 +339,11 @@ export function createServer(
           'closed), for commands that never exit (dev servers, watch modes), or for ' +
           'destructive ones (rm -rf, git reset --hard, force pushes) unless the user ' +
           'asked for them. Each call is a fresh process, so cd does not persist: use ' +
-          'cwd, which must be inside the allowed directories (default: the first one). ' +
-          'The command itself is not confined to them. The command and any processes ' +
+          (allowedDirs
+            ? 'cwd, which must be inside the allowed directories (default: the first one). ' +
+              'The command itself is not confined to them. '
+            : "cwd (default: the server's working directory). ") +
+          'The command and any processes ' +
           'it started are killed after timeoutMs. Past 20000 characters stdout and ' +
           'stderr each keep their start and end and omit the middle; binary output is ' +
           'replaced by a short note.',
@@ -336,7 +358,9 @@ export function createServer(
             .string()
             .optional()
             .describe(
-              'Directory to run the command in, inside the allowed directories. Defaults to the first allowed directory.',
+              allowedDirs
+                ? 'Directory to run the command in, inside the allowed directories. Defaults to the first allowed directory.'
+                : "Directory to run the command in. Defaults to the server's working directory.",
             ),
           timeoutMs: z
             .int()
@@ -356,7 +380,7 @@ export function createServer(
       async (args, ctx) => {
         const cwd = args.cwd
           ? await validatePath(args.cwd, allowedDirs)
-          : allowedDirs[0]
+          : (allowedDirs?.[0] ?? process.cwd())
         const result = await runShell(
           args.command,
           cwd,

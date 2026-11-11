@@ -168,3 +168,38 @@ describe('filesystem call timeout', () => {
     expect(await outcome).toContain('timed out after 15000 ms: realpath')
   })
 })
+
+describe('without allowed directories', () => {
+  it('accepts any path, resolved through symlinks', async () => {
+    await fs.writeFile(path.join(outside, 's'), 'secret')
+    await fs.symlink(path.join(outside, 's'), path.join(root, 'link'))
+    expect(await validatePath(path.join(root, 'link'), null)).toBe(
+      path.join(outside, 's'),
+    )
+    expect(
+      await validatePath(path.join(outside, 'new', 'deep.txt'), null),
+    ).toBe(path.join(outside, 'new', 'deep.txt'))
+  })
+
+  it('resolves a relative path against the working directory', async () => {
+    expect(await validatePath('package.json', null)).toBe(
+      path.join(await fs.realpath(process.cwd()), 'package.json'),
+    )
+  })
+
+  it('still refuses a NUL byte and names a broken symlink', async () => {
+    await expect(validatePath(path.join(root, 'a\0b'), null)).rejects.toThrow(
+      'Access denied',
+    )
+    await fs.symlink(path.join(root, 'gone'), path.join(root, 'broken'))
+    await expect(validatePath(path.join(root, 'broken'), null)).rejects.toThrow(
+      'Broken symlink',
+    )
+  })
+
+  it('treats an empty list as "nothing allowed", not as "no restriction"', async () => {
+    await expect(validatePath(path.join(root, 'x'), [])).rejects.toThrow(
+      'Access denied',
+    )
+  })
+})

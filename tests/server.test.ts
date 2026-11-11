@@ -6,7 +6,11 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { Client, InMemoryTransport } from '@modelcontextprotocol/client'
 import { serveStdio } from '@modelcontextprotocol/server/stdio'
 import { parseArgs } from '../src/index.js'
-import { MAX_TOOL_INPUT_ELEMENTS, createServer } from '../src/server.js'
+import {
+  MAX_TOOL_INPUT_ELEMENTS,
+  createServer,
+  type ServerOptions,
+} from '../src/server.js'
 
 let dir: string
 let closers: Array<() => Promise<void>>
@@ -24,21 +28,19 @@ afterEach(async () => {
   await fs.rm(dir, { recursive: true, force: true })
 })
 
-async function connect(
-  readOnly: boolean,
-  enableShell = false,
+/** A client connected to a server built with `allowedDirs` and `options`. */
+async function connectTo(
+  allowedDirs: string[] | null,
+  options: ServerOptions = {},
   // Left out, the client's default applies. 'auto' negotiates the 2026-07-28
   // protocol revision, 'legacy' the 2025 one.
   mode?: 'auto' | 'legacy',
 ): Promise<Client> {
   const [clientTransport, serverTransport] =
     InMemoryTransport.createLinkedPair()
-  const handle = serveStdio(
-    () => createServer([dir], { readOnly, enableShell }),
-    {
-      transport: serverTransport,
-    },
-  )
+  const handle = serveStdio(() => createServer(allowedDirs, options), {
+    transport: serverTransport,
+  })
   const client = new Client(
     { name: 'test', version: '0.0.0' },
     mode ? { versionNegotiation: { mode } } : undefined,
@@ -50,6 +52,10 @@ async function connect(
   )
   return client
 }
+
+/** The usual test server: restricted to `dir`, shell off unless asked for. */
+const connect = (readOnly: boolean, shell = false, mode?: 'auto' | 'legacy') =>
+  connectTo([dir], { readOnly, shell }, mode)
 
 const callError = async (
   client: Client,
@@ -148,7 +154,15 @@ describe('parseArgs', () => {
     expect(parseArgs(['/a', '/b'])).toEqual({
       directories: ['/a', '/b'],
       readOnly: false,
-      enableShell: false,
+      shell: true,
+    })
+  })
+
+  it('allows no directories at all, which means no restriction', () => {
+    expect(parseArgs([])).toEqual({
+      directories: [],
+      readOnly: false,
+      shell: true,
     })
   })
 
@@ -157,15 +171,20 @@ describe('parseArgs', () => {
     expect(parseArgs(['/a', '--read-only', '/b'])).toEqual({
       directories: ['/a', '/b'],
       readOnly: true,
-      enableShell: false,
+      shell: true,
     })
   })
 
-  it('accepts --enable-shell', () => {
-    expect(parseArgs(['--enable-shell', '/a'])).toMatchObject({
+  it('turns the shell off with --no-shell', () => {
+    expect(parseArgs(['--no-shell', '/a'])).toMatchObject({
       directories: ['/a'],
-      enableShell: true,
+      shell: false,
     })
+    expect(parseArgs(['--no-shell']).directories).toEqual([])
+  })
+
+  it('no longer knows --enable-shell, the shell being on by default', () => {
+    expect(() => parseArgs(['--enable-shell'])).toThrow('Unknown option')
   })
 
   it('rejects an unknown option instead of treating it as a directory', () => {
@@ -178,7 +197,7 @@ describe('parseArgs', () => {
     expect(parseArgs(['--', '--read-only'])).toEqual({
       directories: ['--read-only'],
       readOnly: false,
-      enableShell: false,
+      shell: true,
     })
   })
 })
@@ -231,10 +250,15 @@ describe('shell tool', () => {
     return { isError: result.isError, text: block.text }
   }
 
-  it('is absent by default and under --read-only, present with --enable-shell', async () => {
-    expect(await names(await connect(false))).not.toContain('shell')
-    expect(await names(await connect(true, true))).not.toContain('shell')
-    expect(await names(await connect(false, true))).toContain('shell')
+  it('is present unless turned off, and never served under --read-only', async () => {
+    expect(await names(await connectTo([dir]))).toContain('shell')
+    expect(await names(await connectTo(null))).toContain('shell')
+    expect(await names(await connectTo(null, { shell: false }))).not.toContain(
+      'shell',
+    )
+    expect(
+      await names(await connectTo([dir], { readOnly: true })),
+    ).not.toContain('shell')
   })
 
   it('runs in the first allowed directory by default', async () => {
@@ -661,5 +685,121 @@ describe('input size limit', () => {
     })
     expect(result.isError).toBeFalsy()
     expect((await fs.stat(file)).size).toBe(1_000_000)
+  })
+})
+
+describe('without allowed directories', () => {
+  let other: string
+
+  beforeEach(async () => {
+    other = await fs.realpath(
+      await fs.mkdtemp(path.join(os.tmpdir(), 'fs-mcp-open-')),
+    )
+    await fs.writeFile(
+      path.join(other, 'elsewhere.txt'),
+      'outside the test dir',
+    )
+  })
+
+  afterEach(async () => {
+    await fs.rm(other, { recursive: true, force: true })
+  })
+
+  const call = async (
+    client: Client,
+    name: string,
+    args: Record<string, unknown>,
+  ) => {
+    const result = await client.callTool({ name, arguments: args })
+    return {
+      isError: result.isError,
+      text: (result.content as Array<{ text: string }>)[0].text,
+    }
+  }
+
+  it('serves every tool, the shell included, by default', async () => {
+    expect(await names(await connectTo(null))).toEqual([
+      'edit_file',
+      'read_file',
+      'read_multiple_files',
+      'shell',
+      'write_file',
+    ])
+  })
+
+  it('reads, writes and edits any path', async () => {
+    const client = await connectTo(null)
+    const file = path.join(other, 'elsewhere.txt')
+    expect((await call(client, 'read_file', { path: file })).text).toBe(
+      'outside the test dir',
+    )
+    const made = path.join(other, 'new', 'deep', 'f.txt')
+    expect(
+      (await call(client, 'write_file', { path: made, content: 'hi' })).isError,
+    ).toBeFalsy()
+    expect(await fs.readFile(made, 'utf-8')).toBe('hi')
+    const edited = await call(client, 'edit_file', {
+      path: file,
+      edits: [{ oldText: 'outside', newText: 'beyond' }],
+    })
+    expect(edited.isError).toBeFalsy()
+    expect(await fs.readFile(file, 'utf-8')).toBe('beyond the test dir')
+  })
+
+  it('resolves relative paths against the working directory', async () => {
+    const client = await connectTo(null)
+    const { text } = await call(client, 'read_file', { path: 'package.json' })
+    expect(text).toContain('"name": "fs-mcp-server"')
+  })
+
+  it('runs the shell in the working directory unless told otherwise', async () => {
+    const client = await connectTo(null)
+    const here = JSON.parse(
+      (await call(client, 'shell', { command: 'pwd' })).text,
+    )
+    expect(await fs.realpath(here.stdout)).toBe(
+      await fs.realpath(process.cwd()),
+    )
+    const there = JSON.parse(
+      (await call(client, 'shell', { command: 'pwd', cwd: other })).text,
+    )
+    expect(await fs.realpath(there.stdout)).toBe(other)
+  })
+
+  it('says so in the instructions and descriptions, without a stale restriction', async () => {
+    const client = await connectTo(null)
+    expect(client.getInstructions()).toContain(
+      'not restricted to particular directories',
+    )
+    expect(client.getInstructions()).toContain(
+      'shell tool runs commands with the same access',
+    )
+    const tools = (await client.listTools()).tools
+    for (const tool of tools) {
+      expect(JSON.stringify(tool), tool.name).not.toContain('allowed director')
+    }
+  })
+
+  it('keeps the restriction wording when directories are given', async () => {
+    const client = await connectTo([dir], { shell: true })
+    const tools = (await client.listTools()).tools
+    expect(
+      tools.find((tool) => tool.name === 'read_file')?.description,
+    ).toContain('Only works within allowed directories')
+    expect(client.getInstructions()).toContain(`limited to: ${dir}`)
+  })
+
+  it('leaves the shell out of the instructions when it is turned off', async () => {
+    const client = await connectTo(null, { shell: false })
+    expect(client.getInstructions()).not.toContain('shell')
+  })
+
+  it('still refuses everything for an empty list of directories, which is not "unrestricted"', async () => {
+    const client = await connectTo([], { shell: false })
+    const result = await call(client, 'read_file', {
+      path: path.join(other, 'elsewhere.txt'),
+    })
+    expect(result.isError).toBe(true)
+    expect(result.text).toContain('Access denied')
   })
 })
