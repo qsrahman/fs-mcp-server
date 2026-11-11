@@ -749,7 +749,7 @@ describe('without allowed directories', () => {
   it('resolves relative paths against the working directory', async () => {
     const client = await connectTo(null)
     const { text } = await call(client, 'read_file', { path: 'package.json' })
-    expect(text).toContain('"name": "fs-mcp-server"')
+    expect(text).toContain('"name": "@qsrahman/fs-mcp-server"')
   })
 
   it('runs the shell in the working directory unless told otherwise', async () => {

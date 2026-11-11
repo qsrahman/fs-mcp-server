@@ -64,6 +64,7 @@ Known gaps (do not claim otherwise in docs): no protection against directory-swa
 
 - `files` is a whitelist (`dist`, minus source maps, plus README and LICENSE); `prepare` runs `tsc`, so `npm publish`, `pnpm publish` and git installs all build first. Check the contents with `pnpm pack` before publishing.
 - `devEngines` pins pnpm, and plain `npm` commands in this repo fail with EBADDEVENGINES, so publish with `pnpm publish`.
+- The package is scoped (`@qsrahman/fs-mcp-server`); the command it installs is still `fs-mcp-server`, so `npx -y @qsrahman/fs-mcp-server` works because the package has a single `bin`. `publishConfig.access` is `public`, which a first publish of a scoped package needs. Keep `server.ts`'s `serverInfo.name` (`fs-mcp-server`) as the display name; it is not the npm name.
 - The `bin` entry works through npm's symlink because `index.ts` compares real paths before running `main()`. Keep that guard.
 
 ## Gotchas

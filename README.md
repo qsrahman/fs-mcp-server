@@ -73,10 +73,10 @@ Requires Node.js 22 or newer.
 Once the package is published to npm:
 
 ```bash
-npx -y fs-mcp-server [--read-only] [--no-shell] [/path/to/dir ...]
+npx -y @qsrahman/fs-mcp-server [--read-only] [--no-shell] [/path/to/dir ...]
 ```
 
-Before then, run a built tarball (`pnpm pack`, then `npx -y --package ./fs-mcp-server-0.1.0.tgz fs-mcp-server`) or build from source below. Installing straight from a git URL builds the package with its `prepare` script, which npm skips if `ignore-scripts` is set in your npm config.
+Before then, run a built tarball (`pnpm pack`, then `npx -y --package ./qsrahman-fs-mcp-server-0.1.0.tgz fs-mcp-server`) or build from source below. Installing straight from a git URL builds the package with its `prepare` script, which npm skips if `ignore-scripts` is set in your npm config.
 
 ### From source
 
@@ -106,13 +106,13 @@ Every client below starts the server as a subprocess over stdio. The examples be
 #### Claude Code
 
 ```bash
-claude mcp add fs -- npx -y fs-mcp-server
+claude mcp add fs -- npx -y @qsrahman/fs-mcp-server
 ```
 
 Everything after `--` is the server command, so server options go there too. The default scope is just you in the current project; add `--scope project` before the name to write a shareable `.mcp.json`, or `--scope user` to use it in every project:
 
 ```bash
-claude mcp add --scope project fs -- npx -y fs-mcp-server --no-shell /path/to/project
+claude mcp add --scope project fs -- npx -y @qsrahman/fs-mcp-server --no-shell /path/to/project
 ```
 
 A project's `.mcp.json` looks like this (Claude Code asks you to approve a project server before using it):
@@ -122,7 +122,7 @@ A project's `.mcp.json` looks like this (Claude Code asks you to approve a proje
   "mcpServers": {
     "fs": {
       "command": "npx",
-      "args": ["-y", "fs-mcp-server"]
+      "args": ["-y", "@qsrahman/fs-mcp-server"]
     }
   }
 }
@@ -143,7 +143,7 @@ Open **Settings → Developer → Edit Config** (from the Claude menu in the men
   "mcpServers": {
     "fs": {
       "command": "npx",
-      "args": ["-y", "fs-mcp-server"]
+      "args": ["-y", "@qsrahman/fs-mcp-server"]
     }
   }
 }
@@ -161,7 +161,7 @@ Put this in `.cursor/mcp.json` (one project) or `~/.cursor/mcp.json` (everywhere
     "fs": {
       "type": "stdio",
       "command": "npx",
-      "args": ["-y", "fs-mcp-server"]
+      "args": ["-y", "@qsrahman/fs-mcp-server"]
     }
   }
 }
@@ -177,7 +177,7 @@ Put this in `.vscode/mcp.json` in your workspace, or in your user profile's `mcp
     "fs": {
       "type": "stdio",
       "command": "npx",
-      "args": ["-y", "fs-mcp-server"]
+      "args": ["-y", "@qsrahman/fs-mcp-server"]
     }
   }
 }

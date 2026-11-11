@@ -1,5 +1,5 @@
 {
-  "name": "fs-mcp-server",
+  "name": "@qsrahman/fs-mcp-server",
   "version": "0.1.0",
   "description": "MCP server for reading, writing and editing files and running shell commands, with switches to restrict it.",
   "main": "dist/index.js",
@@ -25,6 +25,9 @@
     "README.md",
     "LICENSE"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "keywords": [
     "mcp",
     "model-context-protocol",
