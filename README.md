@@ -70,13 +70,13 @@ Requires Node.js 22 or newer.
 
 ### With npx
 
-Once the package is published to npm:
+Install nothing; npx fetches the [published package](https://www.npmjs.com/package/@qsrahman/fs-mcp-server) on first use and caches it:
 
 ```bash
 npx -y @qsrahman/fs-mcp-server [--read-only] [--no-shell] [/path/to/dir ...]
 ```
 
-Before then, run a built tarball (`pnpm pack`, then `npx -y --package ./qsrahman-fs-mcp-server-0.1.0.tgz fs-mcp-server`) or build from source below. Installing straight from a git URL builds the package with its `prepare` script, which npm skips if `ignore-scripts` is set in your npm config.
+Other ways to run it: build from source (below), or install straight from GitHub with `npx -y github:qsrahman/fs-mcp-server`. A git install builds the package with its `prepare` script, which npm skips if `ignore-scripts` is set in your npm config. To try a local build, run `pnpm pack` and then `npx -y --package ./qsrahman-fs-mcp-server-0.1.0.tgz fs-mcp-server`.
 
 ### From source
 
@@ -101,7 +101,7 @@ An unrecognised option is an error and the server exits (a mistyped `--read-only
 
 ### Connect a client
 
-Every client below starts the server as a subprocess over stdio. The examples below are unrestricted with the shell on, which is the default. Add `--no-shell` or `--read-only` after the package name to take access away, and absolute directories after it to limit the file tools (see [Security model](#security-model)). Until the package is published to npm, use the source-checkout form at the end of this section.
+Every client below starts the server as a subprocess over stdio. The examples below are unrestricted with the shell on, which is the default. Add `--no-shell` or `--read-only` after the package name to take access away, and absolute directories after it to limit the file tools (see [Security model](#security-model)).
 
 #### Claude Code
 
@@ -185,7 +185,7 @@ Put this in `.vscode/mcp.json` in your workspace, or in your user profile's `mcp
 
 #### From a source checkout
 
-After `pnpm install && pnpm build`, replace the command in any of the configs above with Node and the built entry point:
+To run your own build, after `pnpm install && pnpm build`, replace the command in any of the configs above with Node and the built entry point:
 
 ```json
 { "command": "node", "args": ["/absolute/path/to/fs-mcp-server/dist/index.js"] }
