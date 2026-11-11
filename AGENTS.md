@@ -63,9 +63,23 @@ Known gaps (do not claim otherwise in docs): no protection against directory-swa
 ## Publishing
 
 - `files` is a whitelist (`dist`, minus source maps, plus README and LICENSE); `prepare` runs `tsc`, so `npm publish`, `pnpm publish` and git installs all build first. Check the contents with `pnpm pack` before publishing.
-- `devEngines` pins pnpm, and plain `npm` commands in this repo fail with EBADDEVENGINES, so publish with `pnpm publish`.
+- `devEngines` pins pnpm, and plain `npm` commands in this repo fail with EBADDEVENGINES, so a manual publish uses `pnpm publish`. Normal releases go through the workflow below.
 - The package is scoped (`@qsrahman/fs-mcp-server`); the command it installs is still `fs-mcp-server`, so `npx -y @qsrahman/fs-mcp-server` works because the package has a single `bin`. `publishConfig.access` is `public`, which a first publish of a scoped package needs. Keep `server.ts`'s `serverInfo.name` (`fs-mcp-server`) as the display name; it is not the npm name.
 - The `bin` entry works through npm's symlink because `index.ts` compares real paths before running `main()`. Keep that guard.
+
+### Releasing (GitHub Actions)
+
+`.github/workflows/release.yml` publishes to npm when a `vX.Y.Z` tag is pushed. It uses npm trusted publishing (OIDC), so no npm token is stored anywhere. Two jobs: `verify` installs, runs `pnpm validate`, builds and packs, with no publish rights; `publish` has the only `id-token: write` and runs no repository code, only `npm publish` on the tarball `verify` produced. Actions are pinned to commit SHAs (version in a comment); update them deliberately.
+
+One-time setup on npmjs.com (only the package owner can do this): the package's Settings → Trusted Publisher → GitHub Actions, with organization or user `qsrahman`, repository `fs-mcp-server`, workflow filename `release.yml` (exactly, it is case-sensitive), and the environment name `npm` or blank. **Tick `npm publish` under allowed actions**: the default allows only `npm stage publish`. npm's docs say a new trusted-publisher configuration must complete its first successful publish within two days. Then set the package's Publishing access to "Require two-factor authentication and disallow tokens" and revoke any publish tokens. Optionally add required reviewers to the `npm` environment (repo Settings → Environments) for a manual approval before each publish.
+
+To release:
+
+1. Bump `version` in `package.json`, run `pnpm validate`, commit to `main` and push.
+2. `git tag vX.Y.Z && git push origin vX.Y.Z`. The tag must match `package.json` and point at a commit on `main`, or `verify` fails.
+3. Watch the run: `gh run watch`. A manual run (`gh workflow run release.yml`) rehearses everything except the upload; on an already-released version it only prints a notice, because npm refuses to republish a version even for `--dry-run`.
+
+Things to know: `repository.url` in `package.json` must match the GitHub repository exactly, or npm rejects the OIDC token; the publish uses `npm` (not `pnpm`) on a tarball from a directory with no `package.json`, because `devEngines` makes `npm` fail inside this repo; provenance is attached automatically. If trusted publishing stops working, `pnpm publish` with a granular token still works as a fallback.
 
 ## Gotchas
 
