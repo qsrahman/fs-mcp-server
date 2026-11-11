@@ -89,13 +89,13 @@ Known gaps (do not claim otherwise in docs): no protection against directory-swa
 
 ### Releasing (GitHub Actions)
 
-`.github/workflows/release.yml` publishes to npm when a `vX.Y.Z` tag is pushed. It uses npm trusted publishing (OIDC), so no npm token is stored anywhere. Two jobs: `verify` installs, runs `pnpm validate`, builds and packs, with no publish rights; `publish` has the only `id-token: write` and runs no repository code, only `npm publish` on the tarball `verify` produced. Actions are pinned to commit SHAs (version in a comment); update them deliberately.
+`.github/workflows/release.yml` publishes to npm when a `vX.Y.Z` tag is pushed. It uses npm trusted publishing (OIDC), so no npm token is stored anywhere. Four jobs: `verify` installs, runs `pnpm validate`, builds and packs, with no publish rights; `publish` has the only `id-token: write` and runs no repository code, only `npm publish` on the tarball `verify` produced; then `smoke` installs the published version from npm, checks its signatures and provenance and talks to it over stdio (red means the published package is broken), and `release` creates the GitHub release with this version's `CHANGELOG.md` section as its notes (the only job with `contents: write`). Actions are pinned to commit SHAs (version in a comment); update them deliberately.
 
 One-time setup on npmjs.com (only the package owner can do this): the package's Settings → Trusted Publisher → GitHub Actions, with organization or user `qsrahman`, repository `workshop-mcp`, workflow filename `release.yml` (exactly, it is case-sensitive), and the environment name `npm` or blank. **Tick `npm publish` under allowed actions**: the default allows only `npm stage publish`. npm's docs say a new trusted-publisher configuration must complete its first successful publish within two days. Then set the package's Publishing access to "Require two-factor authentication and disallow tokens" and revoke any publish tokens. Optionally add required reviewers to the `npm` environment (repo Settings → Environments) for a manual approval before each publish.
 
 To release:
 
-1. Bump `version` in `package.json`, run `pnpm validate`, commit to `main` and push.
+1. Bump `version` in `package.json` and add a `## [X.Y.Z] - date` section to `CHANGELOG.md` (the release fails without one), run `pnpm validate`, commit to `main` and push.
 2. `git tag vX.Y.Z && git push origin vX.Y.Z`. The tag must match `package.json` and point at a commit on `main`, or `verify` fails.
 3. Watch the run: `gh run watch`. A manual run (`gh workflow run release.yml`) rehearses everything except the upload; on an already-released version it only prints a notice, because npm refuses to republish a version even for `--dry-run`.
 

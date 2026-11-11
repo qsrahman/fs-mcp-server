@@ -26,6 +26,8 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -54,6 +56,21 @@ jobs:
           fi
           if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
             echo "::error::Tag $TAG is not on main"
+            exit 1
+          fi
+
+      - id: meta
+        run: echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+
+      # The GitHub release's notes come from CHANGELOG.md, so a tag without an
+      # entry for its version stops here, before anything is published.
+      - name: Check the changelog
+        if: github.event_name == 'push'
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          if ! grep -q "^## \[$VERSION\] " CHANGELOG.md; then
+            echo "::error::CHANGELOG.md has no '## [$VERSION]' section"
             exit 1
           fi
 
@@ -141,3 +158,107 @@ jobs:
             exit 0
           fi
           npm publish "$tarball" --access public $DRY_RUN # DRY_RUN is empty or one flag
+
+  # Installs the version that was just published, as a user would, and starts
+  # it. It has no publish rights; a red result means the published package is
+  # broken, not that publishing failed.
+  smoke:
+    if: github.event_name == 'push'
+    needs: [verify, publish]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          package-manager-cache: false
+
+      - name: Install the published package and talk to it
+        env:
+          VERSION: ${{ needs.verify.outputs.version }}
+        run: |
+          set -eu
+          pkg="@qsrahman/workshop-mcp@$VERSION"
+          # the registry can take a little while to serve a new version
+          for attempt in 1 2 3 4 5 6 7 8 9 10 11 12; do
+            npm view "$pkg" version > /dev/null 2>&1 && break
+            [ "$attempt" = 12 ] && { echo "::error::$pkg is not on the registry"; exit 1; }
+            sleep 15
+          done
+          dir=$(mktemp -d)
+          cd "$dir"
+          npm init -y > /dev/null
+          npm install "$pkg"
+          # verifies the registry signatures and the provenance attestation
+          npm audit signatures
+          node - <<'JS'
+          const { spawn } = require('node:child_process')
+          const child = spawn('./node_modules/.bin/workshop-mcp', ['--no-shell'], {
+            stdio: ['pipe', 'pipe', 'inherit'],
+          })
+          const send = (message) =>
+            child.stdin.write(JSON.stringify({ jsonrpc: '2.0', ...message }) + '\n')
+          const timer = setTimeout(() => {
+            console.error('::error::no answer from the published server within 20 s')
+            child.kill()
+            process.exit(1)
+          }, 20_000)
+          let buffer = ''
+          child.stdout.on('data', (data) => {
+            buffer += data
+            for (const line of buffer.split('\n').slice(0, -1)) {
+              const reply = JSON.parse(line)
+              if (reply.id === 1) {
+                send({ method: 'notifications/initialized' })
+                send({ id: 2, method: 'tools/list' })
+              } else if (reply.id === 2) {
+                const names = reply.result.tools.map((tool) => tool.name)
+                console.log('tools:', names.join(', '))
+                if (!names.includes('read_file') || names.includes('shell')) {
+                  console.error('::error::unexpected tool list ' + names)
+                  process.exitCode = 1
+                }
+                clearTimeout(timer)
+                child.kill()
+              }
+            }
+            buffer = buffer.slice(buffer.lastIndexOf('\n') + 1)
+          })
+          send({
+            id: 1,
+            method: 'initialize',
+            params: {
+              protocolVersion: '2025-06-18',
+              capabilities: {},
+              clientInfo: { name: 'smoke', version: '0' },
+            },
+          })
+          JS
+
+  # Creates the GitHub release for the tag, with this version's CHANGELOG.md
+  # section as its notes. It runs after the publish, only needs to read files,
+  # and has no npm rights.
+  release:
+    if: github.event_name == 'push'
+    needs: [verify, publish]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write # to create the release
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ needs.verify.outputs.version }}
+        run: |
+          set -eu
+          awk -v v="$VERSION" '/^## \[/ { on = index($0, "## [" v "]") == 1; next } on' CHANGELOG.md > "$RUNNER_TEMP/notes.md"
+          test -s "$RUNNER_TEMP/notes.md"
+          gh release create "$TAG" --verify-tag --title "$TAG" --notes-file "$RUNNER_TEMP/notes.md"
