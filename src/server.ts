@@ -31,6 +31,12 @@ const READ_ANNOTATIONS = {
 
 const MAX_READ_PATHS = 50
 
+// The SDK rejects a call whose arguments hold more array elements and object
+// members than this, before any handler runs. Strings do not count, so file
+// contents are unaffected. An edit is about three of these, so this allows
+// roughly 1,600 edits in one call, far more than a model sends.
+export const MAX_TOOL_INPUT_ELEMENTS = 5_000
+
 const pathParam = z
   .string()
   .describe('Absolute path, or relative to the first allowed directory.')
@@ -92,7 +98,16 @@ export function createServer(
 ): McpServer {
   const server = new McpServer(
     { name: 'fs-mcp-server', version },
-    { instructions: serverInstructions(allowedDirs, readOnly, enableShell) },
+    {
+      instructions: serverInstructions(allowedDirs, readOnly, enableShell),
+      // The tool list is fixed for the life of the process, so never announce
+      // changes (clients may open a notification stream for them) and let a
+      // 2026-07-28 client reuse the list for a few minutes. `private`: a
+      // client's copy is not shared with other users.
+      capabilities: { tools: { listChanged: false } },
+      cacheHints: { 'tools/list': { ttlMs: 300_000, cacheScope: 'private' } },
+      maxToolInputElements: MAX_TOOL_INPUT_ELEMENTS,
+    },
   )
 
   // Keyed on the annotation, not a list of write tools, so a new tool is
@@ -118,7 +133,7 @@ export function createServer(
         'offset and limit to read a range of lines, head for the first N lines, ' +
         'or tail for the last N lines (use only one of the three). Only works ' +
         'within allowed directories.',
-      inputSchema: z.object({
+      inputSchema: z.strictObject({
         path: pathParam,
         offset: z
           .number()
@@ -182,7 +197,7 @@ export function createServer(
         'one file does not stop the others. Output is capped at about 200,000 ' +
         'characters in total; a file that does not fit is cut, with the offset ' +
         'to continue from with read_file. Only works within allowed directories.',
-      inputSchema: z.object({
+      inputSchema: z.strictObject({
         paths: z
           .array(z.string())
           .min(1)
@@ -227,7 +242,12 @@ export function createServer(
         'Create a new file or completely overwrite an existing file, creating ' +
         'any missing parent directories. Overwrites without warning; to change ' +
         'part of an existing file use edit_file. Only works within allowed directories.',
-      inputSchema: z.object({ path: pathParam, content: z.string() }),
+      inputSchema: z.strictObject({
+        path: pathParam,
+        content: z
+          .string()
+          .describe('The complete new contents of the file, written as given.'),
+      }),
       annotations: {
         readOnlyHint: false,
         idempotentHint: true,
@@ -256,9 +276,14 @@ export function createServer(
         'whole lines are ignored when there is no exact match. If any edit has ' +
         'no match or an ambiguous one, nothing is written. Returns a git-style ' +
         'diff. Only works within allowed directories.',
-      inputSchema: z.object({
+      inputSchema: z.strictObject({
         path: pathParam,
-        edits: z.array(fileEditSchema).min(1),
+        edits: z
+          .array(fileEditSchema)
+          .min(1)
+          .describe(
+            'The replacements to make, applied in order. Each oldText must match exactly one place unless replaceAll is set.',
+          ),
         dryRun: z
           .boolean()
           .default(false)
@@ -300,7 +325,7 @@ export function createServer(
           'it started are killed after timeoutMs. Past 20000 characters stdout and ' +
           'stderr each keep their start and end and omit the middle; binary output is ' +
           'replaced by a short note.',
-        inputSchema: z.object({
+        inputSchema: z.strictObject({
           command: z
             .string()
             .min(1)

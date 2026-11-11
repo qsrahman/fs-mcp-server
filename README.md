@@ -16,7 +16,7 @@ The tools are ported, in trimmed form, from the reference [filesystem server](ht
 
 ### For agents
 
-The server sends MCP `instructions` when a client connects: the allowed directories, how relative paths resolve, and advice to read before editing, to prefer `edit_file` over `write_file`, and to use `offset` and `limit` on long files. Errors name the path as the client wrote it (`File not found: src/a.ts`, `src is a directory, not a file`).
+The server sends MCP `instructions` when a client connects: the allowed directories, how relative paths resolve, and advice to read before editing, to prefer `edit_file` over `write_file`, and to use `offset` and `limit` on long files. Errors name the path as the client wrote it (`File not found: src/a.ts`, `src is a directory, not a file`). Tool inputs are strict: an unknown or misspelled argument (for example `start_line` for `offset`) is an error that names it, not something silently ignored. Every parameter has a description. The tool list never changes while the server runs, so it is announced with `listChanged: false`, and a client on the 2026-07-28 protocol revision may cache it for five minutes. A call whose arguments hold more than 5,000 array elements and object members combined (about 1,600 edits) is rejected before it runs; string contents such as a file's text do not count.
 
 ### Edit behaviour
 

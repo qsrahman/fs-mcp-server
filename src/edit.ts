@@ -7,7 +7,7 @@ import { z } from 'zod'
 import { normalizeLineEndings, writeFileContent } from './files.js'
 
 // The tool's input schema and the engine's argument type, defined once.
-export const fileEditSchema = z.object({
+export const fileEditSchema = z.strictObject({
   oldText: z
     .string()
     .min(1)

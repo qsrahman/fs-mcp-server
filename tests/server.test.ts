@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { Client, InMemoryTransport } from '@modelcontextprotocol/client'
 import { serveStdio } from '@modelcontextprotocol/server/stdio'
 import { parseArgs } from '../src/index.js'
-import { createServer } from '../src/server.js'
+import { MAX_TOOL_INPUT_ELEMENTS, createServer } from '../src/server.js'
 
 let dir: string
 let closers: Array<() => Promise<void>>
@@ -27,6 +27,9 @@ afterEach(async () => {
 async function connect(
   readOnly: boolean,
   enableShell = false,
+  // Left out, the client's default applies. 'auto' negotiates the 2026-07-28
+  // protocol revision, 'legacy' the 2025 one.
+  mode?: 'auto' | 'legacy',
 ): Promise<Client> {
   const [clientTransport, serverTransport] =
     InMemoryTransport.createLinkedPair()
@@ -36,7 +39,10 @@ async function connect(
       transport: serverTransport,
     },
   )
-  const client = new Client({ name: 'test', version: '0.0.0' })
+  const client = new Client(
+    { name: 'test', version: '0.0.0' },
+    mode ? { versionNegotiation: { mode } } : undefined,
+  )
   await client.connect(clientTransport)
   closers.push(
     () => handle.close(),
@@ -494,5 +500,166 @@ describe('server instructions', () => {
     expect((await connect(false, true)).getInstructions()).toContain(
       'shell tool is not limited',
     )
+  })
+})
+
+describe('what the server advertises to agents', () => {
+  type Schema = {
+    properties?: Record<string, Schema & { description?: string }>
+    items?: Schema
+    additionalProperties?: unknown
+  }
+
+  /** Every object schema, with the path of properties that lack a description. */
+  const audit = (schema: Schema, where: string, found: string[]) => {
+    if (schema.properties) {
+      if (schema.additionalProperties !== false)
+        found.push(`${where}: open object`)
+      for (const [name, property] of Object.entries(schema.properties)) {
+        if (!property.description)
+          found.push(`${where}.${name}: no description`)
+        audit(property, `${where}.${name}`, found)
+      }
+    }
+    if (schema.items) audit(schema.items, `${where}[]`, found)
+    return found
+  }
+
+  it('describes every parameter and rejects unknown ones, for every tool', async () => {
+    const { tools } = await (await connect(false, true)).listTools()
+    expect(tools.map((tool) => tool.name)).toEqual([
+      'read_file',
+      'read_multiple_files',
+      'write_file',
+      'edit_file',
+      'shell',
+    ])
+    for (const tool of tools) {
+      const problems = audit(tool.inputSchema as Schema, tool.name, [])
+      expect(problems, tool.name).toEqual([])
+    }
+  })
+
+  it('does not announce tool list changes, because the list is fixed', async () => {
+    const client = await connect(false, true)
+    expect(client.getServerCapabilities()?.tools?.listChanged).toBe(false)
+  })
+
+  it('lets a 2026-07-28 client reuse the tool list for five minutes', async () => {
+    const client = await connect(false, false, 'auto')
+    const list = (await client.listTools()) as {
+      ttlMs?: number
+      cacheScope?: string
+    }
+    expect(list.ttlMs).toBe(300_000)
+    expect(list.cacheScope).toBe('private')
+  })
+})
+
+describe('misspelled arguments', () => {
+  const call = async (
+    client: Client,
+    name: string,
+    args: Record<string, unknown>,
+  ) => {
+    const result = await client.callTool({ name, arguments: args })
+    return {
+      isError: result.isError,
+      text: (result.content as Array<{ text: string }>)[0].text,
+    }
+  }
+
+  it('fail with the unknown names instead of being ignored', async () => {
+    const client = await connect(false)
+    const file = path.join(dir, 'note.txt')
+    const read = await call(client, 'read_file', {
+      path: file,
+      start_line: 2,
+      max_lines: 3,
+    })
+    expect(read.isError).toBe(true)
+    expect(read.text).toContain('Unrecognized keys: "start_line", "max_lines"')
+  })
+
+  it('also catches a misspelling inside an edit', async () => {
+    const client = await connect(false)
+    const file = path.join(dir, 'note.txt')
+    const edit = await call(client, 'edit_file', {
+      path: file,
+      edits: [{ oldText: 'original', newText: 'changed', replace_all: true }],
+    })
+    expect(edit.isError).toBe(true)
+    expect(edit.text).toContain('Unrecognized key: "replace_all"')
+    expect(await fs.readFile(file, 'utf-8')).toBe('original')
+  })
+
+  it('does not write a file when its content argument is misspelled', async () => {
+    const client = await connect(false)
+    const target = path.join(dir, 'never.txt')
+    const write = await call(client, 'write_file', {
+      path: target,
+      contents: 'x',
+    })
+    expect(write.isError).toBe(true)
+    await expect(fs.access(target)).rejects.toThrow()
+  })
+})
+
+describe('input size limit', () => {
+  const edit = async (client: Client, file: string, edits: unknown[]) => {
+    const result = await client.callTool({
+      name: 'edit_file',
+      arguments: { path: file, edits },
+    })
+    return {
+      isError: result.isError,
+      text: (result.content as Array<{ text: string }>)[0].text,
+    }
+  }
+
+  it('rejects a call with more elements than the limit, before touching the file', async () => {
+    const client = await connect(false)
+    const file = path.join(dir, 'note.txt')
+    // each edit is an array element plus two members
+    const count = Math.ceil(MAX_TOOL_INPUT_ELEMENTS / 3) + 1
+    const edits = Array.from({ length: count }, () => ({
+      oldText: 'original',
+      newText: 'x',
+    }))
+    const result = await edit(client, file, edits)
+    expect(result.isError).toBe(true)
+    expect(result.text).toContain(
+      `maximum of ${MAX_TOOL_INPUT_ELEMENTS} elements`,
+    )
+    expect(await fs.readFile(file, 'utf-8')).toBe('original')
+  })
+
+  it('still accepts a few hundred edits in one call', async () => {
+    const client = await connect(false)
+    const file = path.join(dir, 'many.txt')
+    const ids = Array.from({ length: 300 }, (_, i) =>
+      String(i).padStart(3, '0'),
+    )
+    await fs.writeFile(file, ids.map((id) => `item-${id}`).join('\n') + '\n')
+    const result = await edit(
+      client,
+      file,
+      ids.map((id) => ({ oldText: `item-${id}`, newText: `done-${id}` })),
+    )
+    expect(result.isError).toBeFalsy()
+    expect(await fs.readFile(file, 'utf-8')).toBe(
+      ids.map((id) => `done-${id}`).join('\n') + '\n',
+    )
+  })
+
+  it('does not count the size of strings, so large files can still be written', async () => {
+    const client = await connect(false)
+    const file = path.join(dir, 'big.txt')
+    const result = await client.callTool({
+      name: 'write_file',
+      arguments: { path: file, content: 'x\n'.repeat(500_000) },
+    })
+    expect(result.isError).toBeFalsy()
+    expect((await fs.stat(file)).size).toBe(1_000_000)
   })
 })
