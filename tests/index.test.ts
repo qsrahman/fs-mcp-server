@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
-import { resolveConfig } from '../src/index.js'
+import { parseArgs, resolveConfig } from '../src/index.js'
 import { makeTempDirs, removeTempDirs } from './helpers.js'
 
 describe('resolveConfig', () => {
@@ -77,5 +77,104 @@ describe('resolveConfig', () => {
     expect(
       await resolveConfig(['--read-only', '--no-shell', '--no-fetch'], {}),
     ).toMatchObject({ readOnly: true, shell: false, fetch: false })
+  })
+})
+
+describe('parseArgs', () => {
+  it('takes plain arguments as directories', () => {
+    expect(parseArgs(['/a', '/b'])).toEqual({
+      directories: ['/a', '/b'],
+      readOnly: false,
+      shell: true,
+      fetch: { allowPrivateIps: false, ignoreRobotsTxt: false },
+    })
+  })
+
+  it('allows no directories at all, which means no restriction', () => {
+    expect(parseArgs([])).toEqual({
+      directories: [],
+      readOnly: false,
+      shell: true,
+      fetch: { allowPrivateIps: false, ignoreRobotsTxt: false },
+    })
+  })
+
+  it('accepts --read-only anywhere', () => {
+    expect(parseArgs(['--read-only', '/a']).readOnly).toBe(true)
+    expect(parseArgs(['/a', '--read-only', '/b'])).toEqual({
+      directories: ['/a', '/b'],
+      readOnly: true,
+      shell: true,
+      fetch: { allowPrivateIps: false, ignoreRobotsTxt: false },
+    })
+  })
+
+  it('turns the shell off with --no-shell', () => {
+    expect(parseArgs(['--no-shell', '/a'])).toMatchObject({
+      directories: ['/a'],
+      shell: false,
+    })
+    expect(parseArgs(['--no-shell']).directories).toEqual([])
+  })
+
+  it('no longer knows --enable-shell, the shell being on by default', () => {
+    expect(() => parseArgs(['--enable-shell'])).toThrow('Unknown option')
+  })
+
+  it('rejects an unknown option instead of treating it as a directory', () => {
+    expect(() => parseArgs(['--readonly', '/a'])).toThrow('Unknown option')
+    expect(() => parseArgs(['/a', '--read_only'])).toThrow('--read_only')
+    expect(() => parseArgs(['-x', '/a'])).toThrow('-x')
+  })
+
+  it('treats everything after -- as a directory', () => {
+    expect(parseArgs(['--', '--read-only'])).toEqual({
+      directories: ['--read-only'],
+      readOnly: false,
+      shell: true,
+      fetch: { allowPrivateIps: false, ignoreRobotsTxt: false },
+    })
+  })
+})
+
+describe('fetch options', () => {
+  it('turns fetching off with --no-fetch', () => {
+    expect(parseArgs(['--no-fetch']).fetch).toBe(false)
+    expect(parseArgs(['--no-fetch', '/a']).directories).toEqual(['/a'])
+  })
+
+  it('reads the network policy flags', () => {
+    expect(
+      parseArgs(['--allow-private-ips', '--ignore-robots-txt']).fetch,
+    ).toEqual({
+      allowPrivateIps: true,
+      ignoreRobotsTxt: true,
+    })
+  })
+
+  it('reads --allowed-hosts as a comma separated list, repeated or not, and normalizes it', () => {
+    const hosts = (...args: string[]) =>
+      (parseArgs(args).fetch as { allowedHosts?: string[] }).allowedHosts
+    expect(hosts('--allowed-hosts', 'Example.com,*.docs.example.org')).toEqual([
+      'example.com',
+      '*.docs.example.org',
+    ])
+    expect(
+      hosts('--allowed-hosts', 'a.test', '--allowed-hosts', 'b.test'),
+    ).toEqual(['a.test', 'b.test'])
+    expect(hosts()).toBeUndefined()
+  })
+
+  it('rejects an allowed host that is not a host, rather than ignoring it', () => {
+    expect(() => parseArgs(['--allowed-hosts', 'https://example.com'])).toThrow(
+      'not a host name',
+    )
+    expect(() => parseArgs(['--allowed-hosts', 'example.com:8080'])).toThrow(
+      'not a host name',
+    )
+  })
+
+  it('does not take a directory for the value of a flag without one', () => {
+    expect(parseArgs(['--allow-private-ips', '/a']).directories).toEqual(['/a'])
   })
 })

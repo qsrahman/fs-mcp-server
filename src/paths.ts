@@ -13,7 +13,7 @@ import path from 'node:path'
 export const FS_CALL_TIMEOUT_MS = 15_000
 
 /** A filesystem call that did not settle within the timeout. */
-export class FsTimeoutError extends Error {
+class FsTimeoutError extends Error {
   constructor(operation: string, target: string, ms: number) {
     super(
       `Filesystem call timed out after ${ms} ms: ${operation} ${target}. ` +

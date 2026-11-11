@@ -27,7 +27,7 @@ class FetchFailure extends Error {
 
 export const DEFAULT_TIMEOUT_MS = 30_000
 export const DEFAULT_MAX_LENGTH = 20_000
-export const MAX_MAX_LENGTH = 100_000
+const MAX_MAX_LENGTH = 100_000
 
 // Parsing and extracting run on the main thread and take about 0.4 s for a
 // 1 MB page, so the HTML that is converted is capped; a larger page is cut.
@@ -81,7 +81,6 @@ export const fetchUrlInput = z.strictObject({
       `How long to wait for the server, in milliseconds, for each request including redirects (default ${DEFAULT_TIMEOUT_MS}).`,
     ),
 })
-export type FetchUrlInput = z.infer<typeof fetchUrlInput>
 
 export interface WebFetcherOptions {
   /** Sent as the User-Agent, and matched against robots.txt rules. */
@@ -154,9 +153,24 @@ const normalizedWords = (text: string) =>
     .replace(/[^\p{L}\p{N}]+/gu, ' ')
     .trim()
 
+// The parts of linkedom's DOM used here. The build has no DOM lib, so linkedom's
+// own types resolve to `any`; this keeps the code that touches it checked.
 interface TreeNode {
   firstChild: TreeNode | null
   nextSibling: TreeNode | null
+}
+
+interface DomElement extends TreeNode {
+  setAttribute(name: string, value: string): void
+  prepend(...nodes: TreeNode[]): void
+}
+
+interface HtmlDocument extends TreeNode {
+  documentElement: DomElement | null
+  head: DomElement | null
+  body: { innerHTML: string } | null
+  title?: string
+  createElement(tag: string): DomElement
 }
 
 /** True when the tree nests deeper than `limit`; counted without recursion. */
@@ -177,10 +191,7 @@ function nestsDeeperThan(root: TreeNode, limit: number): boolean {
  * first time they are needed, so a server that never fetches a page does not
  * pay for them.
  */
-export async function htmlToMarkdown(
-  html: string,
-  pageUrl: string,
-): Promise<string> {
+async function htmlToMarkdown(html: string, pageUrl: string): Promise<string> {
   const [{ parseHTML }, { Readability }, { default: Turndown }] =
     await Promise.all([
       import('linkedom'),
@@ -197,7 +208,8 @@ export async function htmlToMarkdown(
   })
   turndown.remove(['script', 'style', 'noscript'])
 
-  const { document } = parseHTML(source)
+  const parse = (): HtmlDocument => parseHTML(source).document
+  const document = parse()
   if (!document.documentElement) {
     throw new FetchFailure(
       `${pageUrl} has no readable content; it does not look like an HTML page. Try raw=true.`,
@@ -220,11 +232,10 @@ export async function htmlToMarkdown(
   let markdown = article?.content
     ? turndown.turndown(article.content).trim()
     : ''
-  let title = article?.title?.trim() || pageTitle
+  const title = article?.title?.trim() || pageTitle
   if (!markdown) {
     // Not article-shaped (an index, a landing page): take the whole body instead.
-    const whole = parseHTML(source).document
-    markdown = turndown.turndown(whole.body?.innerHTML ?? '').trim()
+    markdown = turndown.turndown(parse().body?.innerHTML ?? '').trim()
   }
   if (!markdown) {
     throw new FetchFailure(

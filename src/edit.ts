@@ -22,7 +22,7 @@ export const fileEditSchema = z.strictObject({
       'Replace every match of oldText. By default oldText must match exactly one place.',
     ),
 })
-export type FileEdit = z.infer<typeof fileEditSchema>
+type FileEdit = z.infer<typeof fileEditSchema>
 
 function indentOf(line: string): string {
   return line.slice(0, line.length - line.trimStart().length)

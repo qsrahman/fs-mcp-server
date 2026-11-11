@@ -5,12 +5,12 @@ import { execa } from 'execa'
 
 export const DEFAULT_TIMEOUT_MS = 30_000
 // execa's buffer cap: an oversized `cat` is why output is capped at all.
-export const MAX_BUFFER_CHARS = 10 * 1024 * 1024
+const MAX_BUFFER_CHARS = 10 * 1024 * 1024
 const FORCE_KILL_DELAY_MS = 1_000
 const MAX_OUTPUT_CHARS = 20_000
 const HALF = MAX_OUTPUT_CHARS / 2
 
-export interface CommandResult {
+interface CommandResult {
   ok: boolean
   stdout: string
   stderr: string
@@ -22,7 +22,7 @@ export interface CommandResult {
 // it becomes a note. Oversized text keeps its head and tail: a command's start
 // and its failure, usually at the end, both matter. Terminal escape sequences
 // (colors, cursor moves) are stripped: they are noise to a model and cost tokens.
-export function outputText(raw: string): string {
+function outputText(raw: string): string {
   const text = stripVTControlCharacters(raw)
   if (text.includes('\0')) {
     return `[binary output omitted: ${text.length} characters containing NUL bytes; inspect it with shell, for example: file <path> or xxd <path> | head]`

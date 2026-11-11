@@ -12,7 +12,7 @@ const BINARY_SNIFF_BYTES = 8192
 // How much text one read returns. This protects the model's context window,
 // not memory: 100,000 characters is about 25k tokens. Longer output is cut at
 // a line boundary and says where to continue.
-export const MAX_READ_CHARS = 100_000
+const MAX_READ_CHARS = 100_000
 // The same, for all files of one read_multiple_files call together.
 export const MAX_MULTI_READ_CHARS = 200_000
 
@@ -83,7 +83,7 @@ async function openTextFile(
   }
 }
 
-export interface ReadOptions {
+interface ReadOptions {
   /** Line to start from, 1-based. */
   offset?: number
   /** Most lines to return. */

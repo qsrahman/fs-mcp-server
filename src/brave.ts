@@ -9,7 +9,7 @@
 import { setTimeout as sleep } from 'node:timers/promises'
 import { z } from 'zod'
 
-export const BRAVE_API_BASE = 'https://api.search.brave.com/res/v1'
+const BRAVE_API_BASE = 'https://api.search.brave.com/res/v1'
 
 const REQUEST_TIMEOUT_MS = 15_000
 // Brave's free plan allows about one query per second, and a model that asks
@@ -76,7 +76,7 @@ function searchInput(maxCount: number, defaultCount: number) {
 
 export const webSearchInput = searchInput(20, 10)
 export const newsSearchInput = searchInput(50, 10)
-export type SearchInput = z.infer<typeof webSearchInput>
+type SearchInput = z.infer<typeof webSearchInput>
 
 // Only the fields that are used. The response comes from the network, so it is
 // parsed, not cast.

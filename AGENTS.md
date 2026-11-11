@@ -9,7 +9,8 @@ A stdio MCP server (TypeScript, ESM, Node) exposing four filesystem tools (`read
 ## Layout
 
 - `src/index.ts`: CLI arg parsing, `resolveConfig` (argv + env to server options; throws on unusable input, tested in `tests/index.test.ts`), stdio entry point. `main()` runs only when the file is the process entry point, so importing it (as tests do) starts nothing.
-- `src/server.ts`: `createServer` and the tool registrations. Handlers stay thin; logic lives in the modules below.
+- `src/server.ts`: `createServer`: the server info, instructions, `--read-only` filter, then one `register…` call per tool group.
+- `src/tools/`: the tool registrations, one file per group (`file.ts`, `shell.ts`, `web.ts` for fetch_url and Brave), with `common.ts` holding the shared result helper and annotation sets. Handlers stay thin; logic lives in the modules below.
 - `src/paths.ts`: `validatePath`.
 - `src/files.ts`: `readText` (offset/limit, capped), `tailFile`, `writeFileContent` (creates parent dirs), `withFileLock`, `friendlyFsError`.
 - `src/shell.ts`: `runShell` (execa), output truncation.
@@ -18,7 +19,7 @@ A stdio MCP server (TypeScript, ESM, Node) exposing four filesystem tools (`read
 - `src/web.ts`: `createWebFetcher` (robots.txt, charset decoding, Readability + turndown, a small page cache), `paginate`, the `fetch_url` input schema.
 - `src/brave.ts`: Brave Search client and result formatting for `brave_web_search` / `brave_news_search` (adapted from brave/brave-search-mcp-server).
 - `THIRD_PARTY_NOTICES.md`: licences of the code adapted from other projects; it ships in the npm package.
-- `tests/*.test.ts`: vitest, one file per `src/` module; `server.test.ts` drives `createServer` through an in-memory MCP client. `helpers.ts` makes the temp directories.
+- `tests/*.test.ts`: vitest. One file per `src/` module, plus `server.test.ts` and `tools-*.test.ts`, which drive `createServer` through an in-memory MCP client. `harness.ts` gives those files a temp directory and `connect`/`connectTo`; `helpers.ts` makes the temp directories and the fake Brave server.
 - `dist/`: build output (`pnpm build`). Never edit by hand.
 
 ## Commands

@@ -191,7 +191,7 @@ export function hostIsAllowed(
 
 // ---------------------------------------------------------------------- GET
 
-export interface SafeGetOptions {
+interface SafeGetOptions {
   headers?: Record<string, string>
   timeoutMs: number
   /** The caller's cancellation. */
