@@ -6,6 +6,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseArgs as parseNodeArgs } from 'node:util'
 import { serveStdio } from '@modelcontextprotocol/server/stdio'
+import { normalizeAllowedHost } from './net.js'
 import { createServer } from './server.js'
 
 /**
@@ -40,17 +41,34 @@ export function parseArgs(args: string[]) {
     options: {
       'read-only': { type: 'boolean', default: false },
       'no-shell': { type: 'boolean', default: false },
+      'no-fetch': { type: 'boolean', default: false },
+      'allow-private-ips': { type: 'boolean', default: false },
+      'ignore-robots-txt': { type: 'boolean', default: false },
+      'allowed-hosts': { type: 'string', multiple: true },
     },
   })
+  // --allowed-hosts takes a comma-separated list and may be repeated.
+  const allowedHosts = (values['allowed-hosts'] ?? [])
+    .flatMap((list) => list.split(','))
+    .filter((entry) => entry.trim() !== '')
+    .map(normalizeAllowedHost)
   return {
     directories: positionals,
     readOnly: values['read-only'],
     shell: !values['no-shell'],
+    fetch: values['no-fetch']
+      ? (false as const)
+      : {
+          allowPrivateIps: values['allow-private-ips'],
+          ignoreRobotsTxt: values['ignore-robots-txt'],
+          allowedHosts: allowedHosts.length > 0 ? allowedHosts : undefined,
+        },
   }
 }
 
 const USAGE =
-  'Usage: fs-mcp-server [--read-only] [--no-shell] [allowed-directory...]\n' +
+  'Usage: workshop-mcp [--read-only] [--no-shell] [--no-fetch] [--allow-private-ips]\n' +
+  '                     [--ignore-robots-txt] [--allowed-hosts a.com,*.b.org] [allowed-directory...]\n' +
   'With no directories, file access is not restricted to any.'
 
 async function main() {
@@ -61,7 +79,7 @@ async function main() {
     console.error(`${(error as Error).message}\n${USAGE}`)
     process.exit(1)
   }
-  const { directories, readOnly, shell } = parsed
+  const { directories, readOnly, shell, fetch } = parsed
 
   // No directories means no restriction. Directories that were given but could
   // not be used must never turn into "no restriction", so that case exits.
@@ -79,15 +97,18 @@ async function main() {
   const apiKey = process.env.BRAVE_API_KEY?.trim()
   const brave = apiKey ? { apiKey } : undefined
 
-  serveStdio(() => createServer(allowedDirs, { readOnly, shell, brave }), {
-    onerror: (error) => {
-      console.error('Transport error:', error)
-      process.exitCode = 1
+  serveStdio(
+    () => createServer(allowedDirs, { readOnly, shell, brave, fetch }),
+    {
+      onerror: (error) => {
+        console.error('Transport error:', error)
+        process.exitCode = 1
+      },
     },
-  })
+  )
   const mode = readOnly ? ' (read-only)' : shell ? '' : ' (shell disabled)'
   console.error(
-    `FS MCP Server running on stdio${mode}${brave ? ' (web search on)' : ''}. ` +
+    `workshop-mcp running on stdio${mode}${fetch ? '' : ' (fetch disabled)'}${brave ? ' (web search on)' : ''}. ` +
       (allowedDirs
         ? `Allowed: ${allowedDirs.join(', ')}`
         : 'File access is not restricted.'),

@@ -1,6 +1,6 @@
 # Third-party notices
 
-fs-mcp-server is released under the MIT License (see `LICENSE`). Parts of it are adapted from the projects below, and those parts remain subject to the licences reproduced here. This is a summary of what was taken from where, not legal advice.
+workshop-mcp is released under the MIT License (see `LICENSE`). Parts of it are adapted from the projects below, and those parts remain subject to the licences reproduced here. This is a summary of what was taken from where, not legal advice.
 
 ## modelcontextprotocol/servers (`src/filesystem`)
 
@@ -233,6 +233,24 @@ the full license text.
 ```
 
 </details>
+
+## modelcontextprotocol/servers (`src/fetch`)
+
+<https://github.com/modelcontextprotocol/servers/tree/main/src/fetch>
+
+`fetch_url` (`src/net.ts`, `src/web.ts`) follows the design of this project's fetch server, which is written in Python: refusing non-public destinations on every redirect hop, the byte cap that also counts decompressed bytes, the optional host allowlist (an exact host or `*.domain`), `robots.txt` handling including matching the path as an origin would resolve it, asking for markdown first and returning markdown as it is, extracting the main content, and reading a long page in parts. The list of special-purpose address ranges is taken from it. The code is a new implementation in TypeScript with different libraries. That folder carries its own licence:
+
+```text
+Copyright (c) 2024 Anthropic, PBC.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+```
+
+The libraries `fetch_url` uses are dependencies, not copied code, and keep their own licences: `@mozilla/readability` (Apache-2.0), `linkedom` (ISC), `turndown` (MIT) and `robots-parser` (MIT).
 
 ## brave/brave-search-mcp-server
 

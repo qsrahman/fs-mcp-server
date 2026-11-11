@@ -1,4 +1,4 @@
-# Publishes @qsrahman/fs-mcp-server to npm when a version tag (v*) is pushed.
+# Publishes @qsrahman/workshop-mcp to npm when a version tag (v*) is pushed.
 # Run it by hand (Actions tab, or `gh workflow run release.yml`) for a dry run
 # that does everything except the upload.
 #

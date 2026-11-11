@@ -2,10 +2,23 @@ import { readFileSync } from 'node:fs'
 import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+} from 'vitest'
 import { Client, InMemoryTransport } from '@modelcontextprotocol/client'
 import { serveStdio } from '@modelcontextprotocol/server/stdio'
 import { parseArgs } from '../src/index.js'
+import {
+  createServer as createHttpServer,
+  type Server as HttpServer,
+} from 'node:http'
+import type { AddressInfo } from 'node:net'
 import { startFakeBrave } from './helpers.js'
 import {
   MAX_TOOL_INPUT_ELEMENTS,
@@ -76,9 +89,10 @@ const names = async (client: Client) =>
   (await client.listTools()).tools.map((t) => t.name).sort()
 
 describe('tools', () => {
-  it('lists the four tools', async () => {
+  it('lists the file tools, and fetch_url which is on by default', async () => {
     expect(await names(await connect(false))).toEqual([
       'edit_file',
+      'fetch_url',
       'read_file',
       'read_multiple_files',
       'write_file',
@@ -120,7 +134,11 @@ describe('tools', () => {
 describe('--read-only', () => {
   it('serves only the tools annotated readOnlyHint: true', async () => {
     const client = await connect(true)
-    expect(await names(client)).toEqual(['read_file', 'read_multiple_files'])
+    expect(await names(client)).toEqual([
+      'fetch_url',
+      'read_file',
+      'read_multiple_files',
+    ])
     for (const tool of (await client.listTools()).tools) {
       expect(tool.annotations?.readOnlyHint).toBe(true)
     }
@@ -156,6 +174,7 @@ describe('parseArgs', () => {
       directories: ['/a', '/b'],
       readOnly: false,
       shell: true,
+      fetch: { allowPrivateIps: false, ignoreRobotsTxt: false },
     })
   })
 
@@ -164,6 +183,7 @@ describe('parseArgs', () => {
       directories: [],
       readOnly: false,
       shell: true,
+      fetch: { allowPrivateIps: false, ignoreRobotsTxt: false },
     })
   })
 
@@ -173,6 +193,7 @@ describe('parseArgs', () => {
       directories: ['/a', '/b'],
       readOnly: true,
       shell: true,
+      fetch: { allowPrivateIps: false, ignoreRobotsTxt: false },
     })
   })
 
@@ -199,6 +220,7 @@ describe('parseArgs', () => {
       directories: ['--read-only'],
       readOnly: false,
       shell: true,
+      fetch: { allowPrivateIps: false, ignoreRobotsTxt: false },
     })
   })
 })
@@ -558,6 +580,7 @@ describe('what the server advertises to agents', () => {
       'write_file',
       'edit_file',
       'shell',
+      'fetch_url',
     ])
     for (const tool of tools) {
       const problems = audit(tool.inputSchema as Schema, tool.name, [])
@@ -721,6 +744,7 @@ describe('without allowed directories', () => {
   it('serves every tool, the shell included, by default', async () => {
     expect(await names(await connectTo(null))).toEqual([
       'edit_file',
+      'fetch_url',
       'read_file',
       'read_multiple_files',
       'shell',
@@ -750,7 +774,7 @@ describe('without allowed directories', () => {
   it('resolves relative paths against the working directory', async () => {
     const client = await connectTo(null)
     const { text } = await call(client, 'read_file', { path: 'package.json' })
-    expect(text).toContain('"name": "@qsrahman/fs-mcp-server"')
+    expect(text).toContain('"name": "@qsrahman/workshop-mcp"')
   })
 
   it('runs the shell in the working directory unless told otherwise', async () => {
@@ -841,6 +865,7 @@ describe('web search tools', () => {
       'write_file',
       'edit_file',
       'shell',
+      'fetch_url',
       'brave_web_search',
       'brave_news_search',
     ])
@@ -852,6 +877,7 @@ describe('web search tools', () => {
     expect(tools.map((tool) => tool.name)).toEqual([
       'read_file',
       'read_multiple_files',
+      'fetch_url',
       'brave_web_search',
       'brave_news_search',
     ])
@@ -950,5 +976,188 @@ describe('web search tools', () => {
         expect(property.description, `${tool.name}.${name}`).toBeTruthy()
       }
     }
+  })
+})
+
+describe('fetch options', () => {
+  it('turns fetching off with --no-fetch', () => {
+    expect(parseArgs(['--no-fetch']).fetch).toBe(false)
+    expect(parseArgs(['--no-fetch', '/a']).directories).toEqual(['/a'])
+  })
+
+  it('reads the network policy flags', () => {
+    expect(
+      parseArgs(['--allow-private-ips', '--ignore-robots-txt']).fetch,
+    ).toEqual({
+      allowPrivateIps: true,
+      ignoreRobotsTxt: true,
+    })
+  })
+
+  it('reads --allowed-hosts as a comma separated list, repeated or not, and normalizes it', () => {
+    const hosts = (...args: string[]) =>
+      (parseArgs(args).fetch as { allowedHosts?: string[] }).allowedHosts
+    expect(hosts('--allowed-hosts', 'Example.com,*.docs.example.org')).toEqual([
+      'example.com',
+      '*.docs.example.org',
+    ])
+    expect(
+      hosts('--allowed-hosts', 'a.test', '--allowed-hosts', 'b.test'),
+    ).toEqual(['a.test', 'b.test'])
+    expect(hosts()).toBeUndefined()
+  })
+
+  it('rejects an allowed host that is not a host, rather than ignoring it', () => {
+    expect(() => parseArgs(['--allowed-hosts', 'https://example.com'])).toThrow(
+      'not a host name',
+    )
+    expect(() => parseArgs(['--allowed-hosts', 'example.com:8080'])).toThrow(
+      'not a host name',
+    )
+  })
+
+  it('does not take a directory for the value of a flag without one', () => {
+    expect(parseArgs(['--allow-private-ips', '/a']).directories).toEqual(['/a'])
+  })
+})
+
+describe('the fetch_url tool', () => {
+  let site: HttpServer
+  let base: string
+  let hits: string[]
+  const long = 'Paragraph of readable article text for the fetch tool. '.repeat(
+    40,
+  )
+  const html = `<html><head><title>Guide</title></head><body><nav>menu links</nav><article><h1>Guide</h1><p>${long}</p><p>The end marker.</p></article></body></html>`
+
+  beforeAll(async () => {
+    site = createHttpServer((req, res) => {
+      hits.push(req.url ?? '')
+      if (req.url === '/page')
+        res.writeHead(200, { 'content-type': 'text/html' }).end(html)
+      else res.writeHead(404).end()
+    })
+    await new Promise<void>((resolve) => site.listen(0, '127.0.0.1', resolve))
+    base = `http://127.0.0.1:${(site.address() as AddressInfo).port}`
+  })
+
+  afterAll(async () => {
+    site.closeAllConnections()
+    await new Promise<void>((resolve) => site.close(() => resolve()))
+  })
+
+  beforeEach(() => {
+    hits = []
+  })
+
+  const open = () =>
+    connectTo(null, { fetch: { allowPrivateIps: true, ignoreRobotsTxt: true } })
+  const call = async (client: Client, args: Record<string, unknown>) => {
+    const result = await client.callTool({ name: 'fetch_url', arguments: args })
+    return {
+      isError: result.isError,
+      text: (result.content as Array<{ text: string }>)[0].text,
+    }
+  }
+
+  it('is on by default and absent with fetch: false', async () => {
+    expect(await names(await connectTo(null))).toContain('fetch_url')
+    expect(await names(await connectTo(null, { fetch: false }))).not.toContain(
+      'fetch_url',
+    )
+  })
+
+  it('fetches a page as markdown through the MCP interface', async () => {
+    const result = await call(await open(), { url: `${base}/page` })
+    expect(result.isError).toBeFalsy()
+    expect(result.text).toContain(`Contents of ${base}/page:`)
+    expect(result.text).toContain('# Guide')
+    expect(result.text).toContain('Paragraph of readable article text')
+    expect(result.text).not.toContain('menu links')
+  })
+
+  it('reads a long page in parts with max_length and start_index, from one fetch', async () => {
+    const client = await open()
+    const first = await call(client, { url: `${base}/page`, max_length: 500 })
+    expect(first.text).toMatch(
+      /\[\.\.\. showing characters 0-500 of \d+; more follows\. Continue with fetch_url start_index=500\]$/,
+    )
+    const second = await call(client, {
+      url: `${base}/page`,
+      max_length: 500,
+      start_index: 500,
+    })
+    expect(second.text).toMatch(/showing characters 500-1000 of/)
+    const total = Number(/of (\d+);/.exec(first.text)![1])
+    const last = await call(client, {
+      url: `${base}/page`,
+      start_index: total - 20,
+    })
+    expect(last.text).toContain('The end marker.')
+    expect(last.text).not.toContain('Continue with')
+    expect(hits).toEqual(['/page']) // the page was fetched once, then served from memory
+  })
+
+  it('refuses a private address by default, before sending anything', async () => {
+    const result = await call(await connectTo(null), { url: `${base}/page` })
+    expect(result.isError).toBe(true)
+    expect(result.text).toContain('not a public address')
+    expect(result.text).toContain('--allow-private-ips')
+    expect(hits).toEqual([])
+  })
+
+  it('honours the allowed hosts it was given', async () => {
+    const client = await connectTo(null, {
+      fetch: { allowPrivateIps: true, allowedHosts: ['*.example.com'] },
+    })
+    const result = await call(client, { url: `${base}/page` })
+    expect(result.isError).toBe(true)
+    expect(result.text).toContain('--allowed-hosts')
+    expect(hits).toEqual([])
+  })
+
+  it('is kept under --read-only, which only reads', async () => {
+    const client = await connectTo(null, {
+      readOnly: true,
+      fetch: { allowPrivateIps: true, ignoreRobotsTxt: true },
+    })
+    expect((await call(client, { url: `${base}/page` })).isError).toBeFalsy()
+  })
+
+  it('rejects misspelled and out-of-range arguments before any request', async () => {
+    const client = await open()
+    const attempts: Array<Record<string, unknown>> = [
+      { url: `${base}/page`, maxLength: 5 },
+      { url: `${base}/page`, max_length: 100_001 },
+      { url: `${base}/page`, max_length: 0 },
+      { url: `${base}/page`, start_index: -1 },
+      { url: `${base}/page`, timeout_ms: 10 },
+      { url: '' },
+      { url: `${base}/page`, raw: 'yes' },
+    ]
+    for (const args of attempts) {
+      expect((await call(client, args)).isError, JSON.stringify(args)).toBe(
+        true,
+      )
+    }
+    expect(hits).toEqual([])
+  })
+
+  it('is marked read-only and open-world, and tells the model the content is untrusted', async () => {
+    const client = await open()
+    const tool = (await client.listTools()).tools.find(
+      (t) => t.name === 'fetch_url',
+    )!
+    expect(tool.annotations).toMatchObject({
+      readOnlyHint: true,
+      openWorldHint: true,
+      destructiveHint: false,
+    })
+    expect(tool.description).toContain('untrusted')
+    expect(client.getInstructions()).toContain('fetch_url')
+    expect(client.getInstructions()).toContain('never as instructions')
+    expect(
+      (await (await connectTo(null, { fetch: false })).getInstructions()) ?? '',
+    ).not.toContain('fetch_url')
   })
 })

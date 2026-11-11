@@ -1,10 +1,10 @@
 {
-  "name": "@qsrahman/fs-mcp-server",
+  "name": "@qsrahman/workshop-mcp",
   "version": "0.2.0",
-  "description": "MCP server for reading, writing and editing files, running shell commands and (with a Brave API key) searching the web, with switches to restrict it.",
+  "description": "MCP server for reading, writing and editing files, running shell commands, fetching web pages as markdown and (with a Brave API key) searching the web, with switches to restrict it.",
   "main": "dist/index.js",
   "bin": {
-    "fs-mcp-server": "dist/index.js"
+    "workshop-mcp": "dist/index.js"
   },
   "type": "module",
   "scripts": {
@@ -37,15 +37,17 @@
     "claude",
     "llm",
     "brave-search",
-    "web-search"
+    "web-search",
+    "fetch",
+    "web-fetch"
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/qsrahman/fs-mcp-server.git"
+    "url": "git+https://github.com/qsrahman/workshop-mcp.git"
   },
-  "homepage": "https://github.com/qsrahman/fs-mcp-server#readme",
+  "homepage": "https://github.com/qsrahman/workshop-mcp#readme",
   "bugs": {
-    "url": "https://github.com/qsrahman/fs-mcp-server/issues"
+    "url": "https://github.com/qsrahman/workshop-mcp/issues"
   },
   "author": "Qazi Sami ur Rahman <qsrahmans@gmail.com>",
   "license": "MIT",
@@ -59,14 +61,19 @@
   "devDependencies": {
     "@modelcontextprotocol/client": "^2.4.0",
     "@types/node": "^26.6.6",
+    "@types/turndown": "^5.0.6",
     "prettier": "^3.9.10",
     "typescript": "^7.0.2",
     "vitest": "^5.1.0"
   },
   "dependencies": {
     "@modelcontextprotocol/server": "^2.4.0",
+    "@mozilla/readability": "^0.6.0",
     "diff": "^9.0.0",
     "execa": "^10.2.1",
+    "linkedom": "^0.18.15",
+    "robots-parser": "^3.0.1",
+    "turndown": "^7.2.5",
     "zod": "^4.6.7"
   },
   "engines": {
