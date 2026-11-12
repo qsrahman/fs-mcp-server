@@ -49,6 +49,7 @@ describe('web search tools', () => {
     expect(listed).toEqual([
       'read_file',
       'read_multiple_files',
+      'list_directory',
       'write_file',
       'edit_file',
       'shell',
@@ -63,6 +64,7 @@ describe('web search tools', () => {
     expect(tools.map((tool) => tool.name)).toEqual([
       'read_file',
       'read_multiple_files',
+      'list_directory',
       'fetch_url',
       'brave_web_search',
     ])

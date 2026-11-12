@@ -77,6 +77,60 @@ describe('read_multiple_files, once the budget is used up', () => {
   })
 })
 
+describe('list_directory', () => {
+  const list = async (args: Record<string, unknown>) => {
+    const client = await connect(false)
+    const result = await client.callTool({
+      name: 'list_directory',
+      arguments: args,
+    })
+    return {
+      isError: result.isError,
+      text: (result.content as Array<{ text: string }>)[0].text,
+    }
+  }
+
+  it('lists a directory, and a subdirectory by relative path', async () => {
+    await fs.mkdir(path.join(dir, 'sub'))
+    await fs.writeFile(path.join(dir, 'sub', 'inner.txt'), 'x')
+    expect((await list({ path: dir })).text).toBe('sub/\nnote.txt')
+    expect((await list({ path: 'sub' })).text).toBe('inner.txt')
+  })
+
+  it('lists recursively when asked', async () => {
+    await fs.mkdir(path.join(dir, 'sub'))
+    await fs.writeFile(path.join(dir, 'sub', 'inner.txt'), 'x')
+    expect((await list({ path: dir, recursive: true })).text).toBe(
+      'sub/\nnote.txt\nsub/inner.txt',
+    )
+  })
+
+  it('refuses a directory outside the allowed ones, and a link that leads there', async () => {
+    const outside = await fs.realpath(
+      await fs.mkdtemp(path.join(os.tmpdir(), 'ls-out-')),
+    )
+    try {
+      await fs.symlink(outside, path.join(dir, 'escape'))
+      for (const target of ['/etc', '..', path.join(dir, 'escape')]) {
+        const result = await list({ path: target })
+        expect(result.isError, target).toBe(true)
+        expect(result.text, target).toContain('Access denied')
+      }
+    } finally {
+      await fs.rm(outside, { recursive: true, force: true })
+    }
+  })
+
+  it('says what is wrong when the path is a file or missing', async () => {
+    const file = await list({ path: 'note.txt' })
+    expect(file.isError).toBe(true)
+    expect(file.text).toBe(
+      'note.txt is a file, not a directory; read it with read_file',
+    )
+    expect((await list({ path: 'nope' })).isError).toBe(true)
+  })
+})
+
 describe('read_file tail', () => {
   it('returns the last lines through the tool', async () => {
     const client = await connect(false)

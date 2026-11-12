@@ -16,7 +16,7 @@ export const FS_CALL_TIMEOUT_MS = 15_000
 const ENOENT_CODE = 'ENOENT'
 
 /** A filesystem call that did not settle within the timeout. */
-class FsTimeoutError extends Error {
+export class FsTimeoutError extends Error {
   constructor(operation: string, target: string, ms: number) {
     super(
       `Filesystem call timed out after ${ms} ms: ${operation} ${target}. ` +

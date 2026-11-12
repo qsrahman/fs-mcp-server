@@ -26,7 +26,7 @@ const TOOLS_LIST_CACHE_TTL_MS = 300_000
 
 // Instruction text for file access.
 const FILE_READ_INSTRUCTION =
-  '- Read a file before changing it. Long files are returned in parts of about 100,000 characters; use read_file offset and limit to move through one, or head and tail for its ends.'
+  '- Use list_directory to see what is in a folder, and read a file before changing it. Long files are returned in parts of about 100,000 characters; use read_file offset and limit to move through one, or head and tail for its ends.'
 
 // Instructions for file editing (only when read-only is off).
 const FILE_EDIT_INSTRUCTIONS = [

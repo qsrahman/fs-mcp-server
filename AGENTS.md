@@ -4,7 +4,7 @@ Guidance for AI coding agents working in this repo. See [README.md](README.md) f
 
 ## Overview
 
-A stdio MCP server (TypeScript, ESM, Node) exposing four filesystem tools (`read_file`, `read_multiple_files`, `write_file`, `edit_file`) plus a `shell` tool (ported from tiny-code). **By default it is unrestricted and the shell is on**; `--no-shell`, `--no-fetch`, `--read-only` and optional directories take access away. `fetch_url` (web pages as markdown) is also on by default; `brave_web_search` appears only with `BRAVE_API_KEY`. It is a trimmed port of the reference server at `modelcontextprotocol/servers/src/filesystem`.
+A stdio MCP server (TypeScript, ESM, Node) exposing five filesystem tools (`read_file`, `read_multiple_files`, `list_directory`, `write_file`, `edit_file`) plus a `shell` tool (ported from tiny-code). **By default it is unrestricted and the shell is on**; `--no-shell`, `--no-fetch`, `--read-only` and optional directories take access away. `fetch_url` (web pages as markdown) is also on by default; `brave_web_search` appears only with `BRAVE_API_KEY`. It is a trimmed port of the reference server at `modelcontextprotocol/servers/src/filesystem`.
 
 ## Layout
 
@@ -12,7 +12,7 @@ A stdio MCP server (TypeScript, ESM, Node) exposing four filesystem tools (`read
 - `src/server.ts`: `createServer`: the server info, instructions, `--read-only` filter, then one `register…` call per tool group.
 - `src/tools/`: the tool registrations, one file per group (`file.ts`, `shell.ts`, `web.ts` for fetch_url and Brave), with `common.ts` holding the shared result helper and annotation sets. Handlers stay thin; logic lives in the modules below.
 - `src/paths.ts`: `validatePath`.
-- `src/files.ts`: `readText` (offset/limit, capped), `tailFile`, `writeFileContent` (creates parent dirs), `withFileLock`, `friendlyFsError`.
+- `src/files.ts`: `readText` (offset/limit, capped), `tailFile`, `listDirectory` (breadth first, capped, never follows symlinks), `writeFileContent` (creates parent dirs), `withFileLock`, `friendlyFsError`.
 - `src/shell.ts`: `runShell` (execa), output truncation.
 - `src/edit.ts`: the `edit_file` engine and its mismatch error.
 - `src/net.ts`: `safeGet`, the HTTP GET behind `fetch_url`: address policy, host allowlist, manual redirects, byte-capped decoded reads. `isPublicAddress`, `normalizeAllowedHost`.

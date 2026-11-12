@@ -2,6 +2,12 @@
 
 Versions follow [semver](https://semver.org). Each release's notes on GitHub are taken from the matching section here, and a release tag fails to publish without one.
 
+## [0.5.0] - 2026-11-12
+
+### Added
+
+- **`list_directory`**, a read-only tool that lists a directory (optionally recursively), so an agent can explore a project when the shell is off or under `--read-only`. Directories end in `/` and come first, symbolic links end in `@` and are never followed, `.git` and `node_modules` are listed but not entered, a listing stops at 1,000 entries with a note, and a directory that does not answer within 15 seconds (a stalled network or cloud drive) fails with a clear message instead of hanging.
+
 ## [0.4.1] - 2026-11-12
 
 No change in what the server does; the changes are to tests and tooling.

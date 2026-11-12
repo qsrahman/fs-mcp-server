@@ -2,8 +2,10 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { FS_CALL_TIMEOUT_MS } from '../src/paths.js'
 import {
   friendlyFsError,
+  listDirectory,
   readText,
   tailFile,
   withFileLock,
@@ -15,7 +17,11 @@ let root: string
 let outside: string
 
 beforeEach(async () => ({ root, outside } = await makeTempDirs()))
-afterEach(() => removeTempDirs(root, outside))
+afterEach(async () => {
+  vi.useRealTimers()
+  vi.restoreAllMocks()
+  await removeTempDirs(root, outside)
+})
 
 describe('writeFileContent', () => {
   it('creates, overwrites, and refuses non-regular files', async () => {
@@ -277,5 +283,147 @@ describe('withFileLock', () => {
       })
     await Promise.all(Array.from({ length: 10 }, bump))
     expect(await fs.readFile(f, 'utf-8')).toBe('10')
+  })
+})
+
+describe('listDirectory', () => {
+  const make = async (...names: string[]) => {
+    for (const name of names) {
+      const target = path.join(root, name)
+      if (name.endsWith('/')) await fs.mkdir(target, { recursive: true })
+      else {
+        await fs.mkdir(path.dirname(target), { recursive: true })
+        await fs.writeFile(target, 'x')
+      }
+    }
+  }
+
+  it('lists directories first, then files, each sorted, with / on directories', async () => {
+    await make('b.txt', 'a.txt', 'zdir/', 'adir/')
+    expect(await listDirectory(root, false)).toBe('adir/\nzdir/\na.txt\nb.txt')
+  })
+
+  it('says so when a directory is empty', async () => {
+    expect(await listDirectory(root, false)).toBe('(empty)')
+  })
+
+  it('does not look inside subdirectories unless asked', async () => {
+    await make('src/deep/file.ts', 'top.txt')
+    expect(await listDirectory(root, false)).toBe('src/\ntop.txt')
+  })
+
+  it('lists subdirectories breadth first with names relative to the directory', async () => {
+    await make('a/b/c.txt', 'a/x.txt', 'top.txt')
+    expect(await listDirectory(root, true)).toBe(
+      'a/\ntop.txt\na/b/\na/x.txt\na/b/c.txt',
+    )
+  })
+
+  it('marks a symbolic link with @ and never follows it', async () => {
+    await make('real/inside.txt')
+    await fs.symlink(path.join(root, 'real'), path.join(root, 'link'))
+    await fs.symlink(outside, path.join(root, 'out'))
+    await fs.writeFile(path.join(outside, 'secret.txt'), 's')
+    const listing = await listDirectory(root, true)
+    expect(listing).toContain('link@')
+    expect(listing).toContain('out@')
+    expect(listing).not.toContain('secret.txt')
+    expect(listing).not.toContain('link/inside.txt')
+  })
+
+  it('lists node_modules and .git but does not enter them', async () => {
+    await make('node_modules/pkg/index.js', '.git/HEAD', 'src/a.ts')
+    const listing = await listDirectory(root, true)
+    expect(listing).toContain('node_modules/')
+    expect(listing).toContain('.git/')
+    expect(listing).toContain('src/a.ts')
+    expect(listing).not.toContain('pkg')
+    expect(listing).not.toContain('HEAD')
+  })
+
+  it('stops at 1000 entries and says how to see more', async () => {
+    await Promise.all(
+      Array.from({ length: 1005 }, (_, i) =>
+        fs.writeFile(path.join(root, `f${String(i).padStart(4, '0')}.txt`), ''),
+      ),
+    )
+    const lines = (await listDirectory(root, false)).split('\n')
+    expect(lines).toHaveLength(1001)
+    expect(lines[999]).toBe('f0999.txt')
+    expect(lines[1000]).toContain('stopped after 1000 entries')
+  })
+
+  it('keeps the shallow entries when a recursive listing is cut', async () => {
+    await make('a/', 'b/')
+    await Promise.all(
+      Array.from({ length: 1000 }, (_, i) =>
+        fs.writeFile(
+          path.join(root, 'a', `f${String(i).padStart(4, '0')}`),
+          '',
+        ),
+      ),
+    )
+    const lines = (await listDirectory(root, true)).split('\n')
+    expect(lines.slice(0, 2)).toEqual(['a/', 'b/'])
+    expect(lines.at(-1)).toContain('stopped after 1000 entries')
+  })
+
+  it.skipIf(process.getuid?.() === 0)(
+    'notes a subdirectory it cannot read',
+    async () => {
+      await make('open/x.txt', 'locked/y.txt')
+      await fs.chmod(path.join(root, 'locked'), 0)
+      try {
+        const listing = await listDirectory(root, true)
+        expect(listing).toContain('open/x.txt')
+        expect(listing).toContain('[some subdirectories could not be read]')
+      } finally {
+        await fs.chmod(path.join(root, 'locked'), 0o755)
+      }
+    },
+  )
+
+  it('gives up on a directory that never answers, and says so', async () => {
+    vi.useFakeTimers()
+    vi.spyOn(fs, 'readdir').mockReturnValue(new Promise(() => {}) as never)
+    const outcome = listDirectory(root, false).then(
+      () => 'resolved',
+      (error: Error) => error.message,
+    )
+    await vi.advanceTimersByTimeAsync(FS_CALL_TIMEOUT_MS)
+    expect(await outcome).toContain('timed out after 15000 ms: readdir')
+  })
+
+  it('ends a recursive listing with the timeout when a subdirectory stalls', async () => {
+    await make('a/x.txt')
+    const real = fs.readdir.bind(fs)
+    vi.useFakeTimers()
+    vi.spyOn(fs, 'readdir').mockImplementation(((
+      target: string,
+      ...rest: never[]
+    ) =>
+      target.endsWith('a')
+        ? new Promise(() => {})
+        : real(target, ...rest)) as never)
+    const outcome = listDirectory(root, true).then(
+      () => 'resolved',
+      (error: Error) => error.message,
+    )
+    await vi.advanceTimersByTimeAsync(FS_CALL_TIMEOUT_MS)
+    expect(await outcome).toContain('readdir')
+  })
+
+  it('names a file given instead of a directory, and a missing directory', async () => {
+    await make('f.txt')
+    const asFile = await listDirectory(path.join(root, 'f.txt'), false).catch(
+      (error: unknown) => friendlyFsError(error, 'f.txt').message,
+    )
+    expect(asFile).toBe(
+      'f.txt is a file, not a directory; read it with read_file',
+    )
+    const missing = await listDirectory(path.join(root, 'nope'), false).catch(
+      (error: unknown) => friendlyFsError(error, 'nope').message,
+    )
+    expect(missing).toBe('File not found: nope')
   })
 })

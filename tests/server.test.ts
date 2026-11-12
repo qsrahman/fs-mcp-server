@@ -12,6 +12,7 @@ describe('tools', () => {
     expect(await names(await connect(false))).toEqual([
       'edit_file',
       'fetch_url',
+      'list_directory',
       'read_file',
       'read_multiple_files',
       'write_file',
@@ -64,6 +65,7 @@ describe('--read-only', () => {
     const client = await connect(true)
     expect(await names(client)).toEqual([
       'fetch_url',
+      'list_directory',
       'read_file',
       'read_multiple_files',
     ])
@@ -183,6 +185,7 @@ describe('what the server advertises to agents', () => {
     expect(tools.map((tool) => tool.name)).toEqual([
       'read_file',
       'read_multiple_files',
+      'list_directory',
       'write_file',
       'edit_file',
       'shell',
@@ -351,6 +354,7 @@ describe('without allowed directories', () => {
     expect(await names(await connectTo(null))).toEqual([
       'edit_file',
       'fetch_url',
+      'list_directory',
       'read_file',
       'read_multiple_files',
       'shell',

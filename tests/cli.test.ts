@@ -57,6 +57,7 @@ describe('the built server process', () => {
       expect(await toolNames(client)).toEqual([
         'edit_file',
         'fetch_url',
+        'list_directory',
         'read_file',
         'read_multiple_files',
         'shell',
@@ -74,7 +75,11 @@ describe('the built server process', () => {
 
   it('applies --read-only and --no-fetch from the command line', async () => {
     await withClient(entry, ['--read-only', '--no-fetch', root], async (c) => {
-      expect(await toolNames(c)).toEqual(['read_file', 'read_multiple_files'])
+      expect(await toolNames(c)).toEqual([
+        'list_directory',
+        'read_file',
+        'read_multiple_files',
+      ])
     })
   })
 

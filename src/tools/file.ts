@@ -4,6 +4,7 @@ import { applyFileEdits, fileEditSchema } from '../edit.js'
 import {
   MAX_MULTI_READ_CHARS,
   friendlyFsError,
+  listDirectory,
   readText,
   tailFile,
   withFileLock,
@@ -167,6 +168,39 @@ export function registerFileTools(
         }
       }
       return text(results.join('\n---\n'))
+    },
+  )
+
+  registerTool(
+    'list_directory',
+    {
+      title: 'List Directory',
+      description:
+        'List the entries of a directory, one per line; directories end in / and ' +
+        'symbolic links in @, directories come first. Set recursive to include ' +
+        'subdirectories (names are relative to the directory; .git and ' +
+        'node_modules are listed but not entered). At most 1000 entries are ' +
+        'returned, and the result says when it stopped: list a subdirectory for ' +
+        'the rest.' +
+        onlyWithin,
+      inputSchema: z.strictObject({
+        path: pathParam,
+        recursive: z
+          .boolean()
+          .optional()
+          .describe(
+            'Also list the contents of subdirectories (default false).',
+          ),
+      }),
+      annotations: READ_ANNOTATIONS,
+    },
+    async (args) => {
+      const dir = await validatePath(args.path, allowedDirs)
+      return text(
+        await guard(args.path, () =>
+          listDirectory(dir, args.recursive ?? false),
+        ),
+      )
     },
   )
 

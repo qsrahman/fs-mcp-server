@@ -1,6 +1,6 @@
 {
   "name": "@qsrahman/workshop-mcp",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "description": "MCP server for reading, writing and editing files, running shell commands, fetching web pages as markdown and (with a Brave API key) searching the web, with switches to restrict it.",
   "main": "dist/index.js",
   "bin": {

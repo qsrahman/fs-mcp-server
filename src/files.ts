@@ -5,6 +5,7 @@ import fs, { type FileHandle } from 'node:fs/promises'
 import { constants } from 'node:fs'
 import path from 'node:path'
 import { createInterface } from 'node:readline'
+import { FsTimeoutError, withFsTimeout } from './paths.js'
 
 // File reading constants
 const TAIL_CHUNK_BYTES = 64 * 1024
@@ -29,6 +30,8 @@ export const normalizeLineEndings = (text: string) =>
 const ERROR_MESSAGES: Record<string, (shown: string) => string> = {
   ENOENT: (shown) => `File not found: ${shown}`,
   EISDIR: (shown) => `${shown} is a directory, not a file`,
+  ENOTADIR: (shown) =>
+    `${shown} is a file, not a directory; read it with read_file`,
   ENOTDIR: (shown) => `A parent of ${shown} is not a directory`,
   EACCES: (shown) => `Permission denied: ${shown}`,
   EPERM: (shown) => `Permission denied: ${shown}`,
@@ -242,6 +245,74 @@ export async function tailFile(
 }
 
 const queues = new Map<string, Promise<unknown>>()
+
+// How many entries one listing returns: a listing is for orientation, and a
+// longer one costs context without helping the model choose where to look.
+const MAX_LIST_ENTRIES = 1000
+// Listed, but never entered by a recursive listing: they would use up the
+// entries on files nobody asked about.
+const NOT_ENTERED = new Set(['.git', 'node_modules'])
+
+/**
+ * The entries of a directory, one per line: directories end in "/" and symbolic
+ * links in "@" (a link is never followed). Directories come first, then files,
+ * each sorted by name. A recursive listing goes breadth first, so the shallow
+ * entries are the ones kept when the cap cuts it, and names are relative to
+ * `dir`.
+ */
+export async function listDirectory(
+  dir: string,
+  recursive: boolean,
+): Promise<string> {
+  const lines: string[] = []
+  const queue = ['']
+  let unreadable = false
+  for (let next = 0; next < queue.length; next++) {
+    const prefix = queue[next]
+    let entries
+    try {
+      const where = path.join(dir, prefix)
+      // Only stops waiting (see paths.ts): a directory on a stalled cloud or
+      // network drive must not hold the call forever.
+      entries = await withFsTimeout(
+        fs.readdir(where, { withFileTypes: true }),
+        'readdir',
+        where,
+      )
+    } catch (error) {
+      if (error instanceof FsTimeoutError) throw error
+      if (prefix !== '') {
+        unreadable = true
+        continue
+      }
+      throw (error as NodeJS.ErrnoException).code === 'ENOTDIR'
+        ? codedError('ENOTADIR')
+        : error
+    }
+    entries.sort(
+      (a, b) =>
+        Number(b.isDirectory()) - Number(a.isDirectory()) ||
+        (a.name < b.name ? -1 : a.name > b.name ? 1 : 0),
+    )
+    for (const entry of entries) {
+      if (lines.length >= MAX_LIST_ENTRIES) {
+        lines.push(
+          `[... the listing stopped after ${MAX_LIST_ENTRIES} entries; list a subdirectory to see more]`,
+        )
+        return lines.join('\n')
+      }
+      const name = `${prefix}${entry.name}`
+      if (entry.isDirectory()) {
+        lines.push(`${name}/`)
+        if (recursive && !NOT_ENTERED.has(entry.name)) queue.push(`${name}/`)
+      } else {
+        lines.push(entry.isSymbolicLink() ? `${name}@` : name)
+      }
+    }
+  }
+  if (unreadable) lines.push('[some subdirectories could not be read]')
+  return lines.length > 0 ? lines.join('\n') : '(empty)'
+}
 
 /**
  * Run `fn` after every earlier call with the same key has finished, so two
