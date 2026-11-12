@@ -30,6 +30,18 @@ export class FetchRefusedError extends Error {
 
 // ---------------------------------------------------------------- addresses
 
+// IPv6 addresses in URLs are wrapped in brackets []; this pattern strips them.
+const IPV6_BRACKETS = /^\[|\]$/g
+// IPv6 addresses have 8 groups of 16-bit values (128 bits total).
+const IPV6_GROUPS_COUNT = 8
+// IPv4-mapped IPv6 prefix (::ffff:0:0/96) for IPv4-compatible addresses.
+const IPV4_MAPPED_PREFIX = 0xffff
+// NAT64 prefix (64:ff9b:1::/48) for well-known translation.
+const NAT64_PREFIX_HIGH = 0x64
+const NAT64_PREFIX_MID = 0xff9b
+// IPv4-translated IPv6 prefix (::ffff:0:0/96).
+const IPV4_TRANSLATED_PREFIX = 0xffff
+
 // IANA special-purpose ranges that are not public destinations (the list
 // upstream uses, so the answer does not depend on the Node version).
 const NON_PUBLIC_V4: Array<[string, number]> = [
@@ -87,6 +99,11 @@ const exceptions = blockList(PUBLIC_EXCEPTIONS_V4, PUBLIC_EXCEPTIONS_V6)
 // destination either, so anything outside global unicast is refused by default.
 const globalUnicastV6 = blockList([], [['2000::', 3]])
 
+/** Strip IPv6 brackets and trailing dot, then lowercase. */
+function normalizeHostname(hostname: string): string {
+  return hostname.replace(IPV6_BRACKETS, '').replace(/\.$/, '').toLowerCase()
+}
+
 /** The eight 16-bit groups of an IPv6 address. */
 function ipv6Groups(address: string): number[] {
   // The URL parser writes any IPv6 address in one canonical, compressed form.
@@ -97,7 +114,7 @@ function ipv6Groups(address: string): number[] {
   const zeros =
     tail === undefined
       ? []
-      : Array<string>(8 - first.length - last.length).fill('0')
+      : Array<string>(IPV6_GROUPS_COUNT - first.length - last.length).fill('0')
   return [...first, ...zeros, ...last].map((group) => parseInt(group, 16))
 }
 
@@ -110,11 +127,26 @@ function ipv6Groups(address: string): number[] {
 function embeddedIPv4(groups: number[]): string | undefined {
   const [g0, g1, g2, g3, g4, g5, g6, g7] = groups
   const mapped =
-    g0 === 0 && g1 === 0 && g2 === 0 && g3 === 0 && g4 === 0 && g5 === 0xffff
+    g0 === 0 &&
+    g1 === 0 &&
+    g2 === 0 &&
+    g3 === 0 &&
+    g4 === 0 &&
+    g5 === IPV4_MAPPED_PREFIX
   const nat64 =
-    g0 === 0x64 && g1 === 0xff9b && g2 === 0 && g3 === 0 && g4 === 0 && g5 === 0
+    g0 === NAT64_PREFIX_HIGH &&
+    g1 === NAT64_PREFIX_MID &&
+    g2 === 0 &&
+    g3 === 0 &&
+    g4 === 0 &&
+    g5 === 0
   const translated =
-    g0 === 0 && g1 === 0 && g2 === 0 && g3 === 0xffff && g4 === 0 && g5 === 0
+    g0 === 0 &&
+    g1 === 0 &&
+    g2 === 0 &&
+    g3 === IPV4_TRANSLATED_PREFIX &&
+    g4 === 0 &&
+    g5 === 0
   if (!mapped && !nat64 && !translated) return undefined
   return `${g6 >> 8}.${g6 & 255}.${g7 >> 8}.${g7 & 255}`
 }
@@ -150,14 +182,15 @@ export function isPublicAddress(raw: string): boolean {
  * subdomain at any depth but not example.com itself. No scheme, port or path.
  */
 export function normalizeAllowedHost(entry: string): string {
-  const value = entry.trim().replace(/\.$/, '').toLowerCase()
-  const wildcard = value.startsWith('*.')
+  const value = normalizeHostname(entry.trim())
+  const wildcard = entry.trim().toLowerCase().startsWith('*.')
   const name = wildcard ? value.slice(2) : value
-  const literal = name.replace(/^\[|\]$/g, '')
+  const literal = name.replace(IPV6_BRACKETS, '')
   if (!wildcard && net.isIP(literal)) {
-    return new URL(
-      `http://${net.isIP(literal) === 6 ? `[${literal}]` : literal}/`,
-    ).hostname.replace(/^\[|\]$/g, '')
+    return normalizeHostname(
+      new URL(`http://${net.isIP(literal) === 6 ? `[${literal}]` : literal}/`)
+        .hostname,
+    )
   }
   if (!name || /[*/\\:@[\]?#%\s]/.test(name) || name.includes('..')) {
     throw new Error(
@@ -178,12 +211,10 @@ export function hostIsAllowed(
   host: string,
   allowed: readonly string[],
 ): boolean {
-  let name = host
-    .replace(/^\[|\]$/g, '')
-    .replace(/\.$/, '')
-    .toLowerCase()
-  if (net.isIP(name) === 6)
+  let name = normalizeHostname(host)
+  if (net.isIP(name) === 6) {
     name = new URL(`http://[${name}]/`).hostname.slice(1, -1)
+  }
   return allowed.some((entry) =>
     entry.startsWith('*.') ? name.endsWith(entry.slice(1)) : name === entry,
   )
@@ -217,6 +248,16 @@ export interface SafeResponse {
 }
 
 class BodyTooLargeError extends Error {}
+
+// Content-Encoding values that require decompression before byte counting.
+const GZIP_ENCODINGS = new Set(['gzip', 'x-gzip'])
+const SUPPORTED_ENCODINGS = new Set([
+  'identity',
+  'gzip',
+  'x-gzip',
+  'deflate',
+  '',
+])
 
 /** A connection's lookup, refusing any address the policy does not permit. */
 export function checkedLookup(
@@ -280,12 +321,13 @@ async function readBody(
     .trim()
     .toLowerCase()
   const decoders: NodeJS.ReadWriteStream[] = []
-  if (encoding === 'gzip' || encoding === 'x-gzip')
+  if (GZIP_ENCODINGS.has(encoding)) {
     decoders.push(zlib.createGunzip())
-  else if (encoding === 'deflate') decoders.push(zlib.createInflate())
-  else if (encoding !== 'identity' && encoding !== '') {
+  } else if (encoding === 'deflate') {
+    decoders.push(zlib.createInflate())
+  } else if (!SUPPORTED_ENCODINGS.has(encoding)) {
     throw new Error(
-      `the server answered with an unsupported content encoding (${encoding})`,
+      `the server answered with an unsupported content encoding (${encoding}); supported: identity, gzip, x-gzip, deflate`,
     )
   }
 
@@ -331,8 +373,11 @@ function checkUrl(
       'A URL with a user name or password in it cannot be fetched',
     )
   }
-  const host = url.hostname.replace(/^\[|\]$/g, '')
-  if (options.allowedHosts && !hostIsAllowed(host, options.allowedHosts)) {
+  const host = normalizeHostname(url.hostname)
+  if (
+    options.allowedHosts &&
+    !hostIsAllowed(url.hostname, options.allowedHosts)
+  ) {
     throw new FetchRefusedError(
       `${host} is not one of the hosts this server is allowed to fetch from (--allowed-hosts)`,
     )
