@@ -162,6 +162,40 @@ function secondsUntilReset(headers: Headers): number | undefined {
   return exhausted === -1 ? undefined : reset[exhausted]
 }
 
+/** Build an error for authentication failures. */
+function buildAuthError(status: number, detail: string): Error {
+  const detailMsg = detail ? `: ${clip(detail, MAX_ERROR_DETAIL_CHARS)}` : ''
+  return new Error(
+    `Brave Search rejected the API key (HTTP ${status}${detailMsg}). ` +
+      'Check BRAVE_API_KEY, and that the plan allows this search.',
+  )
+}
+
+/** Build an error for rate-limit responses. */
+function buildRateLimitError(headers: Headers): Error {
+  const wait = secondsUntilReset(headers)
+  const waitMsg = wait === undefined ? '.' : `; it resets in ${wait} seconds.`
+  return new Error(
+    `Brave Search rate limit reached${waitMsg} Try again later, or make fewer searches.`,
+  )
+}
+
+/** Build an error for other HTTP failures. */
+function buildDefaultError(
+  status: number,
+  statusText: string,
+  detail: string,
+): Error {
+  const statusTextPart = statusText ? ` ${statusText}` : ''
+  const detailMsg = detail
+    ? `: ${clip(detail, MAX_ERROR_STATUS_DETAIL_CHARS)}`
+    : ''
+  const hintMsg = status === 422 ? ' (check the search parameters).' : '.'
+  return new Error(
+    `Brave Search returned HTTP ${status}${statusTextPart}${detailMsg}${hintMsg}`,
+  )
+}
+
 /** Turn an HTTP failure into a message an agent can act on. Never includes the key. */
 async function failure(response: Response): Promise<Error> {
   const status = response.status
@@ -186,28 +220,12 @@ async function failure(response: Response): Promise<Error> {
     error.meta?.component === 'authentication' ||
     /TOKEN/.test(error.code ?? '')
   ) {
-    const detailMsg = detail ? `: ${clip(detail, MAX_ERROR_DETAIL_CHARS)}` : ''
-    return new Error(
-      `Brave Search rejected the API key (HTTP ${status}${detailMsg}). ` +
-        'Check BRAVE_API_KEY, and that the plan allows this search.',
-    )
+    return buildAuthError(status, detail)
   }
   if (status === 429) {
-    const wait = secondsUntilReset(response.headers)
-    const waitMsg = wait === undefined ? '.' : `; it resets in ${wait} seconds.`
-    return new Error(
-      `Brave Search rate limit reached${waitMsg} Try again later, or make fewer searches.`,
-    )
+    return buildRateLimitError(response.headers)
   }
-
-  const statusText = response.statusText ? ` ${response.statusText}` : ''
-  const detailMsg = detail
-    ? `: ${clip(detail, MAX_ERROR_STATUS_DETAIL_CHARS)}`
-    : ''
-  const hintMsg = status === 422 ? ' (check the search parameters).' : '.'
-  return new Error(
-    `Brave Search returned HTTP ${status}${statusText}${detailMsg}${hintMsg}`,
-  )
+  return buildDefaultError(status, response.statusText ?? '', detail)
 }
 
 /** Build HTTP headers for a Brave Search request. */

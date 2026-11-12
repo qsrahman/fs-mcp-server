@@ -179,6 +179,73 @@ function lineSimilarity(a: LineGrams, b: LineGrams): number {
   return (2 * shared) / (a.size + b.size)
 }
 
+/** Find the file region most similar to oldText by bigram comparison. */
+function findBestMatch(
+  fileGrams: LineGrams[],
+  oldGrams: LineGrams[],
+  lineCount: number,
+): { best: number; bestScore: number } {
+  let best = 0
+  let bestScore = 0
+  for (let i = 0; i < lineCount; i++) {
+    const width = Math.min(oldGrams.length, fileGrams.length - i)
+    let score = 0
+    for (let j = 0; j < width; j++) {
+      score += lineSimilarity(oldGrams[j], fileGrams[i + j])
+    }
+    if (score > bestScore) {
+      best = i
+      bestScore = score
+    }
+  }
+  return { best, bestScore }
+}
+
+/** Format file lines with line numbers for error display. */
+function formatContextLines(
+  fileLines: string[],
+  start: number,
+  end: number,
+): { formatted: string; wasCut: boolean } {
+  let wasCut = false
+  const numbered = fileLines.slice(start, end).map((line, k) => {
+    const { clipped, wasCut: cut } = clipLine(line)
+    wasCut = wasCut || cut
+    return `${start + k + 1}: ${clipped}`
+  })
+  return { formatted: numbered.join('\n'), wasCut }
+}
+
+/** Format the first difference between oldText and the file. */
+function formatDifference(
+  oldLines: string[],
+  fileLines: string[],
+  best: number,
+  lineCount: number,
+): { message: string; wasCut: boolean } {
+  const differs = Math.max(
+    0,
+    oldLines.findIndex(
+      (line, j) =>
+        best + j >= lineCount || line.trim() !== fileLines[best + j].trim(),
+    ),
+  )
+  const oldDiffLine = clipLine(oldLines[differs])
+  const fileDiffLine = clipLine(fileLines[best + differs])
+  const message =
+    best + differs >= lineCount
+      ? `oldText line ${differs + 1} (${JSON.stringify(oldDiffLine.clipped)}) ` +
+        `runs past the end of the file, which ends at line ${lineCount}.`
+      : `First difference, oldText line ${differs + 1} against file line ` +
+        `${best + differs + 1}:\n` +
+        `  oldText: ${JSON.stringify(oldDiffLine.clipped)}\n` +
+        `  file:    ${JSON.stringify(fileDiffLine.clipped)}`
+  return {
+    message,
+    wasCut: oldDiffLine.wasCut || fileDiffLine.wasCut,
+  }
+}
+
 /**
  * The error message for an edit that matched nowhere in `content` (the file
  * as the earlier edits in the same call left it). It names the edit, says
@@ -193,9 +260,6 @@ function describeEditMismatch(
   editCount: number,
 ): string {
   const oldLines = normalizeLineEndings(oldText).split('\n')
-  // The lines as the matcher sees them, so a terminal newline in oldText
-  // lines up with the file's. The empty element after a terminal newline is
-  // not a line of the file, so it is left out of what is counted and shown.
   const fileLines = content.split('\n')
   const lineCount = content.endsWith('\n')
     ? fileLines.length - 1
@@ -227,24 +291,8 @@ function describeEditMismatch(
     return parts.join('\n\n')
   }
 
-  // Every starting line is scored, including those near the end where fewer
-  // lines than oldText has remain, so a near match at the end of the file is
-  // still found. The earliest start wins a tie. A start is always a real
-  // line, never the empty element after a terminal newline.
   const fileGrams = fileLines.map(lineGrams)
-  let best = 0
-  let bestScore = 0
-  for (let i = 0; i < lineCount; i++) {
-    const width = Math.min(oldLines.length, fileLines.length - i)
-    let score = 0
-    for (let j = 0; j < width; j++) {
-      score += lineSimilarity(oldGrams[j], fileGrams[i + j])
-    }
-    if (score > bestScore) {
-      best = i
-      bestScore = score
-    }
-  }
+  const { best, bestScore } = findBestMatch(fileGrams, oldGrams, lineCount)
 
   if (bestScore === 0) {
     parts.push(
@@ -263,41 +311,27 @@ function describeEditMismatch(
     best + oldLines.length + MISMATCH_CONTEXT_LINES,
     start + MISMATCH_MAX_REGION_LINES,
   )
-  let wasAnyLineCut = false
-  const numbered = fileLines.slice(start, end).map((line, k) => {
-    const { clipped, wasCut } = clipLine(line)
-    wasAnyLineCut = wasAnyLineCut || wasCut
-    return `${start + k + 1}: ${clipped}`
-  })
+  const { formatted, wasCut: contextCut } = formatContextLines(
+    fileLines,
+    start,
+    end,
+  )
   const after = editIndex > 0 ? ', after the earlier edits in this call' : ''
   parts.push(
     `Closest text in the file (lines ${start + 1}-${end} of ` +
-      `${lineCount}${after}):\n${numbered.join('\n')}`,
+      `${lineCount}${after}):\n${formatted}`,
   )
 
-  // Some line differs beyond leading and trailing whitespace, or oldText runs
-  // past the file's end: otherwise the line-by-line matcher would have
-  // matched here. Math.max only keeps the index a valid one.
-  const differs = Math.max(
-    0,
-    oldLines.findIndex(
-      (line, j) =>
-        best + j >= lineCount || line.trim() !== fileLines[best + j].trim(),
-    ),
+  const { message, wasCut: diffCut } = formatDifference(
+    oldLines,
+    fileLines,
+    best,
+    lineCount,
   )
-  const oldDiffLine = clipLine(oldLines[differs])
-  const fileDiffLine = clipLine(fileLines[best + differs])
+  parts.push(message)
+  const wasCut = contextCut || diffCut
   parts.push(
-    best + differs >= lineCount
-      ? `oldText line ${differs + 1} (${JSON.stringify(oldDiffLine.clipped)}) ` +
-          `runs past the end of the file, which ends at line ${lineCount}.`
-      : `First difference, oldText line ${differs + 1} against file line ` +
-          `${best + differs + 1}:\n` +
-          `  oldText: ${JSON.stringify(oldDiffLine.clipped)}\n` +
-          `  file:    ${JSON.stringify(fileDiffLine.clipped)}`,
-  )
-  parts.push(
-    wasAnyLineCut
+    wasCut
       ? 'Some lines above were cut. Read the file to copy oldText from it ' +
           'exactly.'
       : 'Retry with oldText copied exactly from the file, without the ' +
