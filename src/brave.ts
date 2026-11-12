@@ -50,22 +50,20 @@ export const webSearchInput = z.strictObject({
     .min(0)
     .max(9)
     .optional()
-    .describe(
-      'Pages to skip, each of `count` results (0-9, default 0). Use 1 for the second page.',
-    ),
+    .describe('Result pages to skip (0-9, default 0); 1 is the second page.'),
   freshness: z
     .string()
     .regex(FRESHNESS_REGEX)
     .optional()
     .describe(
-      'Only results discovered in a time window: pd (last 24 hours), pw (7 days), pm (31 days), py (365 days), or a range such as 2024-01-01to2024-03-31.',
+      'Only results from a time window: pd (24 hours), pw (7 days), pm (31 days), py (365 days), or a range such as 2024-01-01to2024-03-31.',
     ),
   country: z
     .string()
     .regex(COUNTRY_CODE_REGEX)
     .optional()
     .describe(
-      'Two-letter country code that results should come from, for example US, GB or DE (default US), or ALL.',
+      'Two-letter country code the results should come from, e.g. US, GB, DE (default US), or ALL.',
     ),
   search_lang: z
     .string()

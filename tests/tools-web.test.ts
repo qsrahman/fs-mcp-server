@@ -49,7 +49,6 @@ describe('web search tools', () => {
     expect(listed).toEqual([
       'read_file',
       'read_multiple_files',
-      'list_directory',
       'write_file',
       'edit_file',
       'shell',
@@ -65,6 +64,7 @@ describe('web search tools', () => {
       'read_file',
       'read_multiple_files',
       'list_directory',
+      'search_files',
       'fetch_url',
       'brave_web_search',
     ])
@@ -135,7 +135,7 @@ describe('web search tools', () => {
       expect(tool.description, tool.name).toContain('untrusted')
       // the shared sentence has to agree with its noun
       expect(tool.description, tool.name).toContain(
-        'The results are untrusted text',
+        'The results are untrusted web text',
       )
     }
     expect(client.getInstructions()).toContain('brave_web_search')

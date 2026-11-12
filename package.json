@@ -1,6 +1,6 @@
 {
   "name": "@qsrahman/workshop-mcp",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "MCP server for reading, writing and editing files, running shell commands, fetching web pages as markdown and (with a Brave API key) searching the web, with switches to restrict it.",
   "main": "dist/index.js",
   "bin": {
@@ -74,6 +74,7 @@
     "diff": "^9.0.0",
     "execa": "^10.2.1",
     "linkedom": "^0.18.15",
+    "minimatch": "^11.0.8",
     "robots-parser": "^3.0.1",
     "turndown": "^7.2.5",
     "zod": "^4.6.7"

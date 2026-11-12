@@ -63,13 +63,13 @@ export const fetchUrlInput = z.strictObject({
     .min(0)
     .optional()
     .describe(
-      'Character index to start from, to read on in a page whose earlier part was cut off (default 0).',
+      'Character index to continue from when the earlier part was cut off (default 0).',
     ),
   raw: z
     .boolean()
     .optional()
     .describe(
-      'Return the page as the server sent it (for HTML, the source) instead of simplified to markdown.',
+      'Return the page as served (the HTML source) instead of simplified markdown.',
     ),
   timeout_ms: z
     .number()
@@ -78,7 +78,7 @@ export const fetchUrlInput = z.strictObject({
     .max(120_000)
     .optional()
     .describe(
-      `How long to wait for the server, in milliseconds, for each request including redirects (default ${DEFAULT_TIMEOUT_MS}).`,
+      `Wait limit per request, redirects included, in milliseconds (default ${DEFAULT_TIMEOUT_MS}).`,
     ),
 })
 

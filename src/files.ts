@@ -5,6 +5,7 @@ import fs, { type FileHandle } from 'node:fs/promises'
 import { constants } from 'node:fs'
 import path from 'node:path'
 import { createInterface } from 'node:readline'
+import { minimatch } from 'minimatch'
 import { FsTimeoutError, withFsTimeout } from './paths.js'
 
 // File reading constants
@@ -246,12 +247,44 @@ export async function tailFile(
 
 const queues = new Map<string, Promise<unknown>>()
 
-// How many entries one listing returns: a listing is for orientation, and a
+// How many entries one listing or search returns: it is for orientation, and a
 // longer one costs context without helping the model choose where to look.
 const MAX_LIST_ENTRIES = 1000
-// Listed, but never entered by a recursive listing: they would use up the
-// entries on files nobody asked about.
+// How many entries one search looks at before it gives up.
+const MAX_SEARCH_VISITS = 100_000
+// Listed, but never entered by a recursive listing or a search: they would use
+// up the entries on files nobody asked about.
 const NOT_ENTERED = new Set(['.git', 'node_modules'])
+
+/**
+ * The entries of `dir/prefix`, directories first, each sorted by name. Only
+ * stops waiting (see paths.ts): a directory on a stalled cloud or network
+ * drive must not hold the call forever, and a timeout ends the whole walk.
+ * Returns undefined for a subdirectory that cannot be read; the starting
+ * directory (empty `prefix`) failing is the request failing.
+ */
+async function readWalkDirectory(dir: string, prefix: string) {
+  const where = path.join(dir, prefix)
+  let entries
+  try {
+    entries = await withFsTimeout(
+      fs.readdir(where, { withFileTypes: true }),
+      'readdir',
+      where,
+    )
+  } catch (error) {
+    if (error instanceof FsTimeoutError) throw error
+    if (prefix !== '') return undefined
+    throw (error as NodeJS.ErrnoException).code === 'ENOTDIR'
+      ? codedError('ENOTADIR')
+      : error
+  }
+  return entries.sort(
+    (a, b) =>
+      Number(b.isDirectory()) - Number(a.isDirectory()) ||
+      (a.name < b.name ? -1 : a.name > b.name ? 1 : 0),
+  )
+}
 
 /**
  * The entries of a directory, one per line: directories end in "/" and symbolic
@@ -269,31 +302,11 @@ export async function listDirectory(
   let unreadable = false
   for (let next = 0; next < queue.length; next++) {
     const prefix = queue[next]
-    let entries
-    try {
-      const where = path.join(dir, prefix)
-      // Only stops waiting (see paths.ts): a directory on a stalled cloud or
-      // network drive must not hold the call forever.
-      entries = await withFsTimeout(
-        fs.readdir(where, { withFileTypes: true }),
-        'readdir',
-        where,
-      )
-    } catch (error) {
-      if (error instanceof FsTimeoutError) throw error
-      if (prefix !== '') {
-        unreadable = true
-        continue
-      }
-      throw (error as NodeJS.ErrnoException).code === 'ENOTDIR'
-        ? codedError('ENOTADIR')
-        : error
+    const entries = await readWalkDirectory(dir, prefix)
+    if (!entries) {
+      unreadable = true
+      continue
     }
-    entries.sort(
-      (a, b) =>
-        Number(b.isDirectory()) - Number(a.isDirectory()) ||
-        (a.name < b.name ? -1 : a.name > b.name ? 1 : 0),
-    )
     for (const entry of entries) {
       if (lines.length >= MAX_LIST_ENTRIES) {
         lines.push(
@@ -312,6 +325,89 @@ export async function listDirectory(
   }
   if (unreadable) lines.push('[some subdirectories could not be read]')
   return lines.length > 0 ? lines.join('\n') : '(empty)'
+}
+
+/**
+ * Whether an exclude pattern drops this entry (and so everything below it).
+ * A pattern without "*" is a name matched at any depth ("node_modules" drops
+ * every node_modules directory, but not node_modules_old); one with "*" is a
+ * glob matched as written. A glob ending in "/**" also drops the directory it
+ * names, which minimatch would otherwise match only below it.
+ */
+function isExcluded(
+  relative: string,
+  patterns: readonly string[],
+  isDirectory: boolean,
+): boolean {
+  const match = (pattern: string) => minimatch(relative, pattern, { dot: true })
+  return patterns.some((pattern) =>
+    pattern.includes('*')
+      ? match(pattern) ||
+        (isDirectory && pattern.endsWith('/**') && match(pattern.slice(0, -3)))
+      : match(pattern) || match(`**/${pattern}`) || match(`**/${pattern}/**`),
+  )
+}
+
+/**
+ * Find entries by name: every file or directory under `dir` whose path
+ * relative to `dir` matches the glob `pattern` (case-sensitive, dot files
+ * included). It never reads file contents. Listed like listDirectory: relative
+ * paths, "/" on directories, "@" on symbolic links, which are never followed.
+ * Breadth first, so the shallow matches are the ones kept when the cap cuts
+ * it; excluded entries are pruned before they are read.
+ *
+ * Adapted from the search_files tool of modelcontextprotocol/servers (see
+ * THIRD_PARTY_NOTICES.md): the glob semantics and the exclude patterns follow
+ * it. The walk, the limits and the output are written for this server.
+ */
+export async function searchFiles(
+  dir: string,
+  pattern: string,
+  excludePatterns: readonly string[] = [],
+  maxVisits: number = MAX_SEARCH_VISITS,
+): Promise<string> {
+  const lines: string[] = []
+  const queue = ['']
+  let unreadable = false
+  let visited = 0
+  for (let next = 0; next < queue.length; next++) {
+    const prefix = queue[next]
+    const entries = await readWalkDirectory(dir, prefix)
+    if (!entries) {
+      unreadable = true
+      continue
+    }
+    for (const entry of entries) {
+      const name = `${prefix}${entry.name}`
+      const isDirectory = entry.isDirectory()
+      if (isExcluded(name, excludePatterns, isDirectory)) continue
+      if (++visited > maxVisits) {
+        lines.push(
+          `[... the search stopped after looking at ${maxVisits} entries; search a subdirectory or add excludePatterns]`,
+        )
+        return lines.join('\n')
+      }
+      if (minimatch(name, pattern, { dot: true })) {
+        if (lines.length >= MAX_LIST_ENTRIES) {
+          lines.push(
+            `[... the search stopped after ${MAX_LIST_ENTRIES} matches; use a narrower pattern or path to see more]`,
+          )
+          return lines.join('\n')
+        }
+        lines.push(
+          isDirectory ? `${name}/` : entry.isSymbolicLink() ? `${name}@` : name,
+        )
+      }
+      if (isDirectory && !NOT_ENTERED.has(entry.name)) queue.push(`${name}/`)
+    }
+  }
+  if (lines.length === 0) lines.push('No matches found')
+  if (unreadable) {
+    lines.push(
+      '[some subdirectories could not be read, so matches inside them are missing]',
+    )
+  }
+  return lines.join('\n')
 }
 
 /**

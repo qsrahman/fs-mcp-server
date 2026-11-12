@@ -7,6 +7,7 @@ import {
   friendlyFsError,
   listDirectory,
   readText,
+  searchFiles,
   tailFile,
   withFileLock,
   writeFileContent,
@@ -425,5 +426,148 @@ describe('listDirectory', () => {
       (error: unknown) => friendlyFsError(error, 'nope').message,
     )
     expect(missing).toBe('File not found: nope')
+  })
+})
+
+describe('searchFiles', () => {
+  const make = async (...names: string[]) => {
+    for (const name of names) {
+      const target = path.join(root, name)
+      if (name.endsWith('/')) await fs.mkdir(target, { recursive: true })
+      else {
+        await fs.mkdir(path.dirname(target), { recursive: true })
+        await fs.writeFile(target, 'x')
+      }
+    }
+  }
+  const search = (pattern: string, exclude: string[] = []) =>
+    searchFiles(root, pattern, exclude)
+
+  it('matches a glob against the path relative to the directory', async () => {
+    await make('a.ts', 'b.js', 'src/c.ts', 'src/deep/d.ts')
+    expect(await search('*.ts')).toBe('a.ts')
+    expect(await search('**/*.ts')).toBe('a.ts\nsrc/c.ts\nsrc/deep/d.ts')
+    expect(await search('src/*.ts')).toBe('src/c.ts')
+  })
+
+  it('finds directories, with a / on them, and is case-sensitive and dot-aware', async () => {
+    await make('lib/', 'Lib.txt', '.env', 'sub/.hidden')
+    expect(await search('**/lib')).toBe('lib/')
+    expect(await search('**/LIB*')).toBe('No matches found')
+    expect(await search('**/.*')).toBe('.env\nsub/.hidden')
+    // a bare * reaches dot files too
+    expect(await search('*')).toBe('lib/\nsub/\n.env\nLib.txt')
+  })
+
+  it('goes breadth first, so the shallow matches come first', async () => {
+    await make('a/b/hit.txt', 'a/hit.txt', 'hit.txt')
+    expect(await search('**/hit.txt')).toBe('hit.txt\na/hit.txt\na/b/hit.txt')
+  })
+
+  it('never reads inside files', async () => {
+    await fs.writeFile(path.join(root, 'notes.txt'), 'needle')
+    expect(await search('needle')).toBe('No matches found')
+  })
+
+  it('does not enter node_modules or .git, though they can match themselves', async () => {
+    await make('node_modules/pkg/index.js', '.git/HEAD', 'src/index.js')
+    expect(await search('**/index.js')).toBe('src/index.js')
+    expect(await search('**/node_modules')).toBe('node_modules/')
+    expect(await search('**/.git')).toBe('.git/')
+  })
+
+  it('leaves out excluded names at any depth, and their contents', async () => {
+    await make('dist/a.js', 'src/dist/b.js', 'src/c.js', 'dist_old/d.js')
+    expect(await search('**/*.js', ['dist'])).toBe('dist_old/d.js\nsrc/c.js')
+  })
+
+  it('treats an exclude pattern with * as a glob, and /** as including the directory', async () => {
+    await make('build/a.js', 'src/b.js', 'src/gen/c.js')
+    expect(await search('**', ['build/**'])).toBe(
+      'src/\nsrc/gen/\nsrc/b.js\nsrc/gen/c.js',
+    )
+    expect(await search('**/*.js', ['src/gen/**'])).toBe('build/a.js\nsrc/b.js')
+    expect(await search('**/*.js', ['**/gen'])).toBe('build/a.js\nsrc/b.js')
+  })
+
+  it('marks a symbolic link with @ and never follows it', async () => {
+    await fs.writeFile(path.join(outside, 'secret.txt'), 's')
+    await fs.symlink(outside, path.join(root, 'out'))
+    expect(await search('**')).toBe('out@')
+    expect(await search('**/secret.txt')).toBe('No matches found')
+  })
+
+  it('stops at 1000 matches and says how to narrow the search', async () => {
+    await Promise.all(
+      Array.from({ length: 1005 }, (_, i) =>
+        fs.writeFile(path.join(root, `f${String(i).padStart(4, '0')}.txt`), ''),
+      ),
+    )
+    const lines = (await search('*.txt')).split('\n')
+    expect(lines).toHaveLength(1001)
+    expect(lines[999]).toBe('f0999.txt')
+    expect(lines[1000]).toContain('stopped after 1000 matches')
+  })
+
+  it('gives up after looking at too many entries', async () => {
+    await make('a.txt', 'b.txt', 'c.txt', 'd.txt')
+    const result = await searchFiles(root, '*.nomatch', [], 3)
+    expect(result).toContain('stopped after looking at 3 entries')
+    expect(result).toContain('add excludePatterns')
+  })
+
+  it('does not count excluded entries against the limit', async () => {
+    await make('skip/a', 'skip/b', 'skip/c', 'keep.txt')
+    expect(await searchFiles(root, '*.txt', ['skip'], 3)).toBe('keep.txt')
+  })
+
+  it.skipIf(process.getuid?.() === 0)(
+    'finds what it can and says matches in an unreadable directory are missing',
+    async () => {
+      await make('open/x.txt', 'locked/y.txt')
+      await fs.chmod(path.join(root, 'locked'), 0)
+      try {
+        const result = await search('**/*.txt')
+        expect(result).toContain('open/x.txt')
+        expect(result).toContain('some subdirectories could not be read')
+      } finally {
+        await fs.chmod(path.join(root, 'locked'), 0o755)
+      }
+    },
+  )
+
+  it('says so, without hiding the note, when nothing matched in an unreadable tree', async () => {
+    vi.spyOn(fs, 'readdir').mockImplementation(((target: string) =>
+      target === root
+        ? Promise.resolve([
+            { name: 'd', isDirectory: () => true, isSymbolicLink: () => false },
+          ])
+        : Promise.reject(
+            Object.assign(new Error('denied'), { code: 'EACCES' }),
+          )) as never)
+    expect(await search('**/*.txt')).toBe(
+      'No matches found\n[some subdirectories could not be read, so matches inside them are missing]',
+    )
+  })
+
+  it('gives up on a directory that never answers', async () => {
+    vi.useFakeTimers()
+    vi.spyOn(fs, 'readdir').mockReturnValue(new Promise(() => {}) as never)
+    const outcome = search('*').then(
+      () => 'resolved',
+      (error: Error) => error.message,
+    )
+    await vi.advanceTimersByTimeAsync(FS_CALL_TIMEOUT_MS)
+    expect(await outcome).toContain('timed out after 15000 ms: readdir')
+  })
+
+  it('names a file given instead of a directory', async () => {
+    await make('f.txt')
+    const message = await searchFiles(path.join(root, 'f.txt'), '*').catch(
+      (error: unknown) => friendlyFsError(error, 'f.txt').message,
+    )
+    expect(message).toBe(
+      'f.txt is a file, not a directory; read it with read_file',
+    )
   })
 })

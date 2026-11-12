@@ -2,6 +2,17 @@
 
 Versions follow [semver](https://semver.org). Each release's notes on GitHub are taken from the matching section here, and a release tag fails to publish without one.
 
+## [0.6.0] - 2026-11-12
+
+### Added
+
+- **`search_files`**, a read-only tool that finds files and directories by name with a glob (`*.ts` directly under the directory, `**/*.ts` at any depth) and optional `excludePatterns`, adapted from the reference filesystem server. It never reads file contents. Results are paths relative to the searched directory, directories end in `/`, symbolic links end in `@` and are never followed, `.git` and `node_modules` are not entered, and a search stops at 1,000 matches or after looking at 100,000 entries, with a note. It adds one dependency, `minimatch`.
+
+### Changed
+
+- **`list_directory` and `search_files` are offered only when the shell is not available** (`--no-shell` or `--read-only`). With the shell on, which is the default, `ls` and `find` do the same job, and the two tools would add about 560 tokens to every conversation. 0.5.0 offered `list_directory` in every configuration; with the shell on, use `ls` through `shell`.
+- Shorter tool descriptions, parameter descriptions and server instructions, without dropping any information: repeated sentences were merged, and the instructions no longer repeat what a tool's own description says. `fetch_url` no longer names `brave_web_search`, which is not always offered. The server instructions now say to look around with `ls`, `find` and `grep` when the shell is on.
+
 ## [0.5.0] - 2026-11-12
 
 ### Added

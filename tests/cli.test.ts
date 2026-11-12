@@ -57,7 +57,6 @@ describe('the built server process', () => {
       expect(await toolNames(client)).toEqual([
         'edit_file',
         'fetch_url',
-        'list_directory',
         'read_file',
         'read_multiple_files',
         'shell',
@@ -79,6 +78,7 @@ describe('the built server process', () => {
         'list_directory',
         'read_file',
         'read_multiple_files',
+        'search_files',
       ])
     })
   })

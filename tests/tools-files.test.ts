@@ -131,6 +131,75 @@ describe('list_directory', () => {
   })
 })
 
+describe('search_files', () => {
+  const search = async (args: Record<string, unknown>) => {
+    const client = await connect(false)
+    const result = await client.callTool({
+      name: 'search_files',
+      arguments: args,
+    })
+    return {
+      isError: result.isError,
+      text: (result.content as Array<{ text: string }>)[0].text,
+    }
+  }
+
+  it('finds files by name under a directory, relative to it', async () => {
+    await fs.mkdir(path.join(dir, 'src/deep'), { recursive: true })
+    await fs.writeFile(path.join(dir, 'src/deep/a.ts'), 'x')
+    await fs.writeFile(path.join(dir, 'src/b.ts'), 'x')
+    expect((await search({ path: dir, pattern: '**/*.ts' })).text).toBe(
+      'src/b.ts\nsrc/deep/a.ts',
+    )
+    expect((await search({ path: 'src', pattern: '*.ts' })).text).toBe('b.ts')
+  })
+
+  it('takes exclude patterns', async () => {
+    await fs.mkdir(path.join(dir, 'dist'))
+    await fs.writeFile(path.join(dir, 'dist/a.js'), 'x')
+    await fs.writeFile(path.join(dir, 'b.js'), 'x')
+    const result = await search({
+      path: dir,
+      pattern: '**/*.js',
+      excludePatterns: ['dist'],
+    })
+    expect(result.text).toBe('b.js')
+  })
+
+  it('says when nothing matches', async () => {
+    expect((await search({ path: dir, pattern: '*.nope' })).text).toBe(
+      'No matches found',
+    )
+  })
+
+  it('refuses a directory outside the allowed ones, and a link that leads there', async () => {
+    const outside = await fs.realpath(
+      await fs.mkdtemp(path.join(os.tmpdir(), 'search-out-')),
+    )
+    try {
+      await fs.symlink(outside, path.join(dir, 'escape'))
+      for (const target of ['/etc', '..', path.join(dir, 'escape')]) {
+        const result = await search({ path: target, pattern: '*' })
+        expect(result.isError, target).toBe(true)
+        expect(result.text, target).toContain('Access denied')
+      }
+    } finally {
+      await fs.rm(outside, { recursive: true, force: true })
+    }
+  })
+
+  it('rejects a missing pattern, an empty one and an unknown argument', async () => {
+    for (const args of [
+      { path: dir },
+      { path: dir, pattern: '' },
+      { path: dir, pattern: '*', glob: 'x' },
+      { path: dir, pattern: '*', excludePatterns: 'dist' },
+    ]) {
+      expect((await search(args)).isError, JSON.stringify(args)).toBe(true)
+    }
+  })
+})
+
 describe('read_file tail', () => {
   it('returns the last lines through the tool', async () => {
     const client = await connect(false)

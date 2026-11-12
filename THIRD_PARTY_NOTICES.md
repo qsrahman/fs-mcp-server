@@ -6,7 +6,7 @@ workshop-mcp is released under the MIT License (see `LICENSE`). Parts of it are 
 
 <https://github.com/modelcontextprotocol/servers>
 
-The file tools (`read_file`, `read_multiple_files`, `write_file`, `edit_file`) are ported from this project's filesystem server and changed: the tool names, parameters and descriptions follow it; the `edit_file` matching, reindenting and mismatch reporting (`src/edit.ts`), the line-based `head`/`tail` reading and the write semantics (`src/files.ts`), and the path validation (`src/paths.ts`) were adapted and rewritten, then extended (for example the read caps, `offset`/`limit`, `replaceAll`, per-file locking and unrestricted mode). Nothing in this repository is endorsed by that project.
+The file tools (`read_file`, `read_multiple_files`, `write_file`, `edit_file`, and `search_files`) are ported from this project's filesystem server and changed: the tool names, parameters and descriptions follow it; the `edit_file` matching, reindenting and mismatch reporting (`src/edit.ts`), the line-based `head`/`tail` reading and the write semantics (`src/files.ts`), and the path validation (`src/paths.ts`) and the glob semantics and exclude patterns of `search_files` (`searchFiles` in `src/files.ts`) were adapted and rewritten, then extended (for example the read caps, `offset`/`limit`, `replaceAll`, per-file locking and unrestricted mode). Nothing in this repository is endorsed by that project.
 
 That project states that it is moving from the MIT License to Apache-2.0, with each contribution under the licence it was made under. Its licence file is reproduced in full below, because I cannot tell which licence applies to each piece that was adapted.
 

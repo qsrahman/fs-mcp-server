@@ -5,6 +5,7 @@ import {
   MAX_MULTI_READ_CHARS,
   friendlyFsError,
   listDirectory,
+  searchFiles,
   readText,
   tailFile,
   withFileLock,
@@ -49,6 +50,7 @@ function formatFileSkipped(filePath: string): string {
 export function registerFileTools(
   registerTool: RegisterTool,
   allowedDirs: readonly string[] | null,
+  { explore }: { explore: boolean },
 ) {
   const pathParam = z
     .string()
@@ -66,10 +68,10 @@ export function registerFileTools(
     {
       title: 'Read File',
       description:
-        'Read a text file. Output is capped at about 100,000 characters; when a ' +
-        'file is longer the result ends with the offset to continue from. Use ' +
-        'offset and limit to read a range of lines, head for the first N lines, ' +
-        'or tail for the last N lines (use only one of the three).' +
+        'Read a text file. Output is capped at about 100,000 characters; a longer ' +
+        'file ends with the offset to continue from. Use offset and limit for a ' +
+        'range of lines, head for the first N lines or tail for the last N (use ' +
+        'only one of the three).' +
         onlyWithin,
       inputSchema: z.strictObject({
         path: pathParam,
@@ -90,13 +92,13 @@ export function registerFileTools(
           .int()
           .min(1)
           .optional()
-          .describe('If provided, returns only the first N lines of the file'),
+          .describe('Return only the first N lines.'),
         tail: z
           .number()
           .int()
           .min(0)
           .optional()
-          .describe('If provided, returns only the last N lines of the file'),
+          .describe('Return only the last N lines.'),
       }),
       annotations: READ_ANNOTATIONS,
     },
@@ -130,11 +132,10 @@ export function registerFileTools(
     {
       title: 'Read Multiple Files',
       description:
-        "Read the contents of multiple files simultaneously. Each file's " +
-        'content is returned with its path as a reference. A failed read of ' +
-        'one file does not stop the others. Output is capped at about 200,000 ' +
-        'characters in total; a file that does not fit is cut, with the offset ' +
-        'to continue from with read_file.' +
+        'Read several files at once, each returned under its path; a failed read ' +
+        'does not stop the others. Output is capped at about 200,000 characters ' +
+        'in total: a file that does not fit is cut, with the offset to continue ' +
+        'from with read_file.' +
         onlyWithin,
       inputSchema: z.strictObject({
         paths: z
@@ -171,47 +172,88 @@ export function registerFileTools(
     },
   )
 
-  registerTool(
-    'list_directory',
-    {
-      title: 'List Directory',
-      description:
-        'List the entries of a directory, one per line; directories end in / and ' +
-        'symbolic links in @, directories come first. Set recursive to include ' +
-        'subdirectories (names are relative to the directory; .git and ' +
-        'node_modules are listed but not entered). At most 1000 entries are ' +
-        'returned, and the result says when it stopped: list a subdirectory for ' +
-        'the rest.' +
-        onlyWithin,
-      inputSchema: z.strictObject({
-        path: pathParam,
-        recursive: z
-          .boolean()
-          .optional()
-          .describe(
-            'Also list the contents of subdirectories (default false).',
+  if (explore) {
+    registerTool(
+      'list_directory',
+      {
+        title: 'List Directory',
+        description:
+          'List a directory, one entry per line: directories (first) end in / and ' +
+          'symbolic links in @. recursive includes subdirectories, with names ' +
+          'relative to the directory; .git and node_modules are listed but not ' +
+          'entered. At most 1000 entries; the result says when it stopped, so ' +
+          'list a subdirectory for the rest.' +
+          onlyWithin,
+        inputSchema: z.strictObject({
+          path: pathParam,
+          recursive: z
+            .boolean()
+            .optional()
+            .describe('Also list subdirectories (default false).'),
+        }),
+        annotations: READ_ANNOTATIONS,
+      },
+      async (args) => {
+        const dir = await validatePath(args.path, allowedDirs)
+        return text(
+          await guard(args.path, () =>
+            listDirectory(dir, args.recursive ?? false),
           ),
-      }),
-      annotations: READ_ANNOTATIONS,
-    },
-    async (args) => {
-      const dir = await validatePath(args.path, allowedDirs)
-      return text(
-        await guard(args.path, () =>
-          listDirectory(dir, args.recursive ?? false),
-        ),
-      )
-    },
-  )
+        )
+      },
+    )
+
+    registerTool(
+      'search_files',
+      {
+        title: 'Search Files',
+        description:
+          'Find files and directories by NAME, never by content. Matches a glob ' +
+          "against each entry's path relative to `path` (case-sensitive, dot files " +
+          "included): '*.ts' directly under `path`, '**/*.ts' at any depth. " +
+          'Returns matching paths relative to `path`, one per line, directories ' +
+          'ending in /. .git and node_modules are not entered (a directory with ' +
+          'that name can still match). At most 1000 matches; the result says ' +
+          'when it stopped.' +
+          onlyWithin,
+        inputSchema: z.strictObject({
+          path: pathParam,
+          pattern: z
+            .string()
+            .min(1)
+            .max(500)
+            .describe(
+              "Glob for the entry's path relative to path, for example '**/*.ts' or '**/name'.",
+            ),
+          excludePatterns: z
+            .array(z.string().min(1).max(500))
+            .max(20)
+            .optional()
+            .describe(
+              "Entries to skip, with their contents. Without '*', a name matched at any depth ('dist'); with '*', a glob matched as written, and one ending in '/**' also skips the directory itself.",
+            ),
+        }),
+        annotations: READ_ANNOTATIONS,
+      },
+      async (args) => {
+        const dir = await validatePath(args.path, allowedDirs)
+        return text(
+          await guard(args.path, () =>
+            searchFiles(dir, args.pattern, args.excludePatterns),
+          ),
+        )
+      },
+    )
+  }
 
   registerTool(
     'write_file',
     {
       title: 'Write File',
       description:
-        'Create a new file or completely overwrite an existing file, creating ' +
-        'any missing parent directories. Overwrites without warning; to change ' +
-        'part of an existing file use edit_file.' +
+        'Create a file or completely overwrite one, creating missing parent ' +
+        'directories. Overwrites without warning; to change part of a file use ' +
+        'edit_file.' +
         onlyWithin,
       inputSchema: z.strictObject({
         path: pathParam,
@@ -238,22 +280,19 @@ export function registerFileTools(
     {
       title: 'Edit File',
       description:
-        'Make line-based edits to a text file. Edits apply in order, each ' +
-        'replacing oldText with newText. oldText must match exactly one place ' +
-        '(include enough surrounding lines to be unique), or set replaceAll to ' +
-        'replace every match. Line endings and leading/trailing whitespace on ' +
-        'whole lines are ignored when there is no exact match. If any edit has ' +
-        'no match or an ambiguous one, nothing is written. Returns a git-style ' +
-        'diff.' +
+        'Make line-based edits to a text file, applied in order: each replaces ' +
+        'oldText with newText. oldText must match exactly one place (add ' +
+        'surrounding lines to make it unique) unless replaceAll is set. When ' +
+        'there is no exact match, line endings and leading/trailing whitespace ' +
+        'on whole lines are ignored. If any edit has no match or an ambiguous ' +
+        'one, nothing is written. Returns a git-style diff.' +
         onlyWithin,
       inputSchema: z.strictObject({
         path: pathParam,
         edits: z
           .array(fileEditSchema)
           .min(1)
-          .describe(
-            'The replacements to make, applied in order. Each oldText must match exactly one place unless replaceAll is set.',
-          ),
+          .describe('The replacements, applied in order.'),
         dryRun: z
           .boolean()
           .default(false)

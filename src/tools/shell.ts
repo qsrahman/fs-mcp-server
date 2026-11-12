@@ -16,18 +16,18 @@ function buildShellDescription(allowedDirs: readonly string[] | null): string {
     ? 'cwd, which must be inside the allowed directories (default: the first one). The command itself is not confined to them.'
     : "cwd (default: the server's working directory)."
   return (
-    'Run a shell command and return its output. A failed command starts with its exit code; ' +
-    'stdout and stderr are labelled [stdout] and [stderr] when stderr has content. ' +
-    'Use for tests, type checks, builds, git and similar. Do NOT use it to read, ' +
-    'write or edit files (use the file tools), for interactive commands (stdin is ' +
-    'closed), for commands that never exit (dev servers, watch modes), or for ' +
-    'destructive ones (rm -rf, git reset --hard, force pushes) unless the user ' +
-    'asked for them. Each call is a fresh process, so cd does not persist: use ' +
+    'Run a shell command and return its output; a failed command starts with ' +
+    'its exit code, and stderr is labelled when there is any. Use it for tests, ' +
+    'type checks, builds, git, and to list and search files (ls, find, grep). ' +
+    'Do NOT use it to read, write or edit files (use the file tools), for ' +
+    'interactive commands (stdin is closed), for commands that never exit (dev ' +
+    'servers, watch modes), or for destructive ones (rm -rf, git reset --hard, ' +
+    'force pushes) unless the user asked. Each call is a fresh process, so cd ' +
+    'does not persist: use ' +
     cwdPolicy +
-    ' The command and any processes ' +
-    'it started are killed after timeoutMs. Past 20000 characters stdout and ' +
-    'stderr each keep their start and end and omit the middle; binary output is ' +
-    'replaced by a short note.'
+    ' The command and its child processes are killed after timeoutMs. Output ' +
+    'past 20000 characters keeps its start and end; binary output becomes a ' +
+    'short note.'
   )
 }
 

@@ -15,6 +15,7 @@ describe('tools', () => {
       'list_directory',
       'read_file',
       'read_multiple_files',
+      'search_files',
       'write_file',
     ])
   })
@@ -68,6 +69,7 @@ describe('--read-only', () => {
       'list_directory',
       'read_file',
       'read_multiple_files',
+      'search_files',
     ])
     for (const tool of (await client.listTools()).tools) {
       expect(tool.annotations?.readOnlyHint).toBe(true)
@@ -140,21 +142,38 @@ describe('server info', () => {
 })
 
 describe('server instructions', () => {
-  it('tell the client the allowed directory and how to read and write', async () => {
+  it('tell the client the allowed directory and how to find, read and write', async () => {
     const instructions = (await connect(false)).getInstructions() ?? ''
     expect(instructions).toContain(dir)
-    expect(instructions).toContain('offset and limit')
+    expect(instructions).toContain('list_directory and search_files')
     expect(instructions).toContain('edit_file')
     expect(instructions).not.toContain('shell')
   })
 
   it('leave out write advice in read-only mode and mention an enabled shell', async () => {
     const readOnly = (await connect(true)).getInstructions() ?? ''
-    expect(readOnly).toContain('offset and limit')
+    expect(readOnly).toContain('list_directory and search_files')
     expect(readOnly).not.toContain('edit_file')
-    expect((await connect(false, true)).getInstructions()).toContain(
-      'shell tool is not limited',
+    // with the shell on, it is how the client looks around, and these tools are absent
+    const withShell = (await connect(false, true)).getInstructions() ?? ''
+    expect(withShell).toContain('shell tool is not limited')
+    expect(withShell).toContain('ls, find, grep')
+    expect(withShell).not.toContain('list_directory')
+  })
+
+  it('name the web tools that are offered, once, as untrusted', async () => {
+    const both =
+      (await connectTo(null, { brave: { apiKey: 'k' } })).getInstructions() ??
+      ''
+    expect(both).toContain(
+      'fetch_url and brave_web_search return untrusted text',
     )
+    const fetchOnly = (await connectTo(null)).getInstructions() ?? ''
+    expect(fetchOnly).toContain('fetch_url return untrusted text')
+    expect(fetchOnly).not.toContain('brave_web_search')
+    const none =
+      (await connectTo(null, { fetch: false })).getInstructions() ?? ''
+    expect(none).not.toContain('untrusted')
   })
 })
 
@@ -180,22 +199,43 @@ describe('what the server advertises to agents', () => {
     return found
   }
 
-  it('describes every parameter and rejects unknown ones, for every tool', async () => {
-    const { tools } = await (await connect(false, true)).listTools()
-    expect(tools.map((tool) => tool.name)).toEqual([
-      'read_file',
-      'read_multiple_files',
-      'list_directory',
-      'write_file',
-      'edit_file',
-      'shell',
-      'fetch_url',
-    ])
-    for (const tool of tools) {
-      const problems = audit(tool.inputSchema as Schema, tool.name, [])
-      expect(problems, tool.name).toEqual([])
-    }
-  })
+  it.each([
+    [
+      'the shell on',
+      true,
+      [
+        'read_file',
+        'read_multiple_files',
+        'write_file',
+        'edit_file',
+        'shell',
+        'fetch_url',
+      ],
+    ],
+    [
+      'the shell off',
+      false,
+      [
+        'read_file',
+        'read_multiple_files',
+        'list_directory',
+        'search_files',
+        'write_file',
+        'edit_file',
+        'fetch_url',
+      ],
+    ],
+  ])(
+    'describes every parameter and rejects unknown ones, for every tool, with %s',
+    async (_label, shell, expected) => {
+      const { tools } = await (await connect(false, shell)).listTools()
+      expect(tools.map((tool) => tool.name)).toEqual(expected)
+      for (const tool of tools) {
+        const problems = audit(tool.inputSchema as Schema, tool.name, [])
+        expect(problems, tool.name).toEqual([])
+      }
+    },
+  )
 
   it('does not announce tool list changes, because the list is fixed', async () => {
     const client = await connect(false, true)
@@ -350,17 +390,30 @@ describe('without allowed directories', () => {
     }
   }
 
-  it('serves every tool, the shell included, by default', async () => {
+  it('serves the shell by default, and not list_directory or search_files, which it replaces', async () => {
     expect(await names(await connectTo(null))).toEqual([
       'edit_file',
       'fetch_url',
-      'list_directory',
       'read_file',
       'read_multiple_files',
       'shell',
       'write_file',
     ])
   })
+
+  it.each([
+    ['--no-shell', { shell: false }],
+    ['--read-only', { readOnly: true }],
+    ['--read-only with the shell asked for', { readOnly: true, shell: true }],
+  ])(
+    'offers list_directory and search_files when the shell is not (%s)',
+    async (_label, options) => {
+      const listed = await names(await connectTo(null, options))
+      expect(listed).toContain('list_directory')
+      expect(listed).toContain('search_files')
+      expect(listed).not.toContain('shell')
+    },
+  )
 
   it('reads, writes and edits any path', async () => {
     const client = await connectTo(null)
