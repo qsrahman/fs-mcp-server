@@ -110,17 +110,24 @@ const ENCODING_BY_BOM: Array<[number[], string]> = [
   [[0xff, 0xfe], 'utf-16le'],
   [[0xfe, 0xff], 'utf-16be'],
 ]
+const CHARSET_REGEX = /charset\s*=\s*["']?([^"';\s]+)/i
+const META_CHARSET_REGEX = /<meta[^>]+charset\s*=\s*["']?([\w:.-]+)/i
 
-/** The page's text: by byte-order mark, then the header's charset, then a <meta> tag, else UTF-8. */
+/** The page's text: by byte-order mark, then the header's charset, then a <meta> tag (HTML only), else UTF-8. */
 export function decodeBody(contentType: string, body: Buffer): string {
-  let label =
-    ENCODING_BY_BOM.find(([bom]) =>
-      bom.every((byte, i) => body[i] === byte),
-    )?.[1] ?? /charset\s*=\s*["']?([^"';\s]+)/i.exec(contentType)?.[1]
+  let label = ENCODING_BY_BOM.find(([bom]) =>
+    bom.every((byte, i) => body[i] === byte),
+  )?.[1]
+
+  if (!label) {
+    label = CHARSET_REGEX.exec(contentType)?.[1]
+  }
+
   if (!label && /html/i.test(contentType || 'html')) {
     const head = body.subarray(0, 2048).toString('latin1')
-    label = /<meta[^>]+charset\s*=\s*["']?([\w:.-]+)/i.exec(head)?.[1]
+    label = META_CHARSET_REGEX.exec(head)?.[1]
   }
+
   try {
     return new TextDecoder(label ?? 'utf-8').decode(body)
   } catch {
@@ -131,6 +138,8 @@ export function decodeBody(contentType: string, body: Buffer): string {
 const BINARY_TYPE =
   /^(image|audio|video|font)\/|^application\/(pdf|zip|gzip|x-gzip|octet-stream|x-tar|x-7z-compressed|x-rar-compressed|wasm)\b/
 const NUL = 0
+const HTML_MIME_TYPES = /^(text\/html|application\/xhtml\+xml)$/
+const HTML_SIGNATURE = /<!doctype html|<html[\s>]/i
 
 /** Text is what a model can use; images, PDFs and archives are a dead end for it. */
 function isTextual(mime: string, body: Buffer): boolean {
@@ -138,12 +147,10 @@ function isTextual(mime: string, body: Buffer): boolean {
   return !body.subarray(0, 8192).includes(NUL)
 }
 
-const isHtmlType = (mime: string) =>
-  mime === 'text/html' || mime === 'application/xhtml+xml'
+const isHtmlType = (mime: string) => HTML_MIME_TYPES.test(mime)
 const isMarkdownType = (mime: string) =>
   mime === 'text/markdown' || mime === 'text/x-markdown'
-const looksLikeHtml = (text: string) =>
-  /<!doctype html|<html[\s>]/i.test(text.slice(0, 1000))
+const looksLikeHtml = (text: string) => HTML_SIGNATURE.test(text.slice(0, 1000))
 
 // -------------------------------------------------------------- extraction
 
@@ -266,8 +273,8 @@ function resolvedPathUrl(url: URL): string {
     .replace(/%2f/gi, '/')
     .replace(/%2e/gi, '.')
     .replace(/\/{2,}/g, '/')
-  const resolved = new URL(decoded, url.origin) // the URL parser removes dot segments
-  return `${url.origin}${resolved.pathname}${url.search}`
+  const resolved = new URL(decoded, url.origin)
+  return `${resolved.href}${url.search ? `?${url.search}` : ''}`
 }
 
 // ------------------------------------------------------------------ fetcher
@@ -363,11 +370,7 @@ export function createWebFetcher(options: WebFetcherOptions) {
 
     if (isMarkdownType(mime)) return page(text)
     if (raw) return page(text)
-    if (
-      isHtmlType(mime) ||
-      (!mime && looksLikeHtml(text)) ||
-      text.slice(0, 100).includes('<html')
-    ) {
+    if (isHtmlType(mime) || looksLikeHtml(text)) {
       return page(await htmlToMarkdown(text, finalUrl))
     }
     return page(
@@ -408,6 +411,8 @@ export function createWebFetcher(options: WebFetcherOptions) {
         })
       }
       cache.set(key, { page, expires: Date.now() + CACHE_TTL_MS })
+      // Evict the oldest entry (FIFO) if cache exceeds max entries.
+      // Maps preserve insertion order, so the first key is always the oldest.
       while (cache.size > CACHE_ENTRIES)
         cache.delete(cache.keys().next().value as string)
       return page
