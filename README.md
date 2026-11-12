@@ -257,7 +257,7 @@ For Claude Code: `claude mcp add workshop -- node /absolute/path/to/workshop-mcp
 #### If it does not connect
 
 - Run the same command in a terminal. It prints `workshop-mcp running on stdio. File access is not restricted.` (or `Allowed: ...` when you listed directories) on stderr and then waits for input; press Ctrl-C to stop.
-- A relative directory is resolved against the client's working directory, which is often not the one you expect, so always use absolute paths. A directory that does not exist is skipped with a warning; with none left the server exits.
+- A relative directory is resolved against the client's working directory, which is often not the one you expect, so always use absolute paths. A directory that does not exist is skipped with a warning; with none left the server exits instead of running unrestricted. The client then shows only a failed connection or an empty tool list, without the reason, so a typo in a directory path looks like a broken server: the terminal run above shows the warning.
 - An unknown option such as `--readonly` is an error, not a directory. Check the spelling.
 - The server needs Node.js 22 or newer on the `PATH` the client uses; GUI apps do not always see your shell's `PATH`.
 
