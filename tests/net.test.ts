@@ -95,6 +95,9 @@ describe('the host allowlist', () => {
     '*.',
     'user@example.com',
     'a..b',
+    '[example.com]', // brackets belong to IPv6 literals only
+    '[example.com',
+    'example.com]',
   ])('rejects the entry %j', (entry) => {
     expect(() => normalizeAllowedHost(entry)).toThrow()
   })

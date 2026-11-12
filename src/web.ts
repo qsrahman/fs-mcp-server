@@ -274,7 +274,7 @@ function resolvedPathUrl(url: URL): string {
     .replace(/%2e/gi, '.')
     .replace(/\/{2,}/g, '/')
   const resolved = new URL(decoded, url.origin)
-  return `${resolved.href}${url.search ? `?${url.search}` : ''}`
+  return `${resolved.href}${url.search}` // search includes its "?"
 }
 
 // ------------------------------------------------------------------ fetcher
@@ -370,7 +370,13 @@ export function createWebFetcher(options: WebFetcherOptions) {
 
     if (isMarkdownType(mime)) return page(text)
     if (raw) return page(text)
-    if (isHtmlType(mime) || looksLikeHtml(text)) {
+    // A declared type decides; a body is sniffed only when there is no type, or
+    // when `<html` opens it (some servers label pages text/plain).
+    if (
+      isHtmlType(mime) ||
+      (!mime && looksLikeHtml(text)) ||
+      text.slice(0, 100).includes('<html')
+    ) {
       return page(await htmlToMarkdown(text, finalUrl))
     }
     return page(

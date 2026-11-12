@@ -2,6 +2,18 @@
 
 Versions follow [semver](https://semver.org). Each release's notes on GitHub are taken from the matching section here, and a release tag fails to publish without one.
 
+## [0.3.5] - 2026-11-12
+
+Fixes for regressions introduced by the refactors in 0.3.4.
+
+### Fixed
+
+- `edit_file` no longer fails with "Cannot read properties of undefined" when `oldText` runs past the end of a file that has no final newline; it explains the mismatch again.
+- The robots.txt check of the resolved path no longer doubles the `?` of a query string (`/private??id=1`), which stopped query-specific rules from matching.
+- A page declared `text/plain` is converted to markdown again only when `<html` opens it, as before 0.3.4, instead of whenever it starts like a page.
+- `--allowed-hosts` rejects entries with stray brackets (`[example.com]`) again instead of silently accepting them.
+- The Brave tool descriptions read "The results are untrusted text" again (0.3.4 had "The results is").
+
 ## [0.3.4] - 2026-11-12
 
 No change in behaviour.

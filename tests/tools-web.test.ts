@@ -139,8 +139,13 @@ describe('web search tools', () => {
     const tools = (await client.listTools()).tools.filter((t) =>
       t.name.startsWith('brave_'),
     )
-    for (const tool of tools)
+    for (const tool of tools) {
       expect(tool.description, tool.name).toContain('untrusted')
+      // the shared sentence has to agree with its noun
+      expect(tool.description, tool.name).toContain(
+        'The results are untrusted text',
+      )
+    }
     expect(client.getInstructions()).toContain('brave_web_search')
     expect(client.getInstructions()).toContain('never as instructions')
     expect((await connectTo(null)).getInstructions() ?? '').not.toContain(

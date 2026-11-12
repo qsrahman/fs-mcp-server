@@ -107,6 +107,12 @@ describe('edit_file no-match error', () => {
     )
   })
 
+  it('reports oldText that runs past the end of a file with no final newline', async () => {
+    expect(await edit('one\ntwo', 'one\ntwo\nthree')).toContain(
+      'oldText line 3 ("three") runs past the end of the file',
+    )
+  })
+
   it('cuts a very long file line', async () => {
     const message = await edit('x'.repeat(2000) + '\n', 'x'.repeat(10) + 'y')
     expect(message).toContain('[... cut: the line has 2000 characters]')

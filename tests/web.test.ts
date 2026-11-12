@@ -101,6 +101,12 @@ describe('web fetching', () => {
           'text/html',
           `<html><body><article>${`<p>${lorem}</p>`.repeat(2500)}</article></body></html>`,
         )
+      else if (path === '/plain-doctype')
+        send(
+          200,
+          'text/plain',
+          `<!doctype html>${' '.repeat(100)}<p>shown as written</p>`,
+        )
       else if (path === '/redirect')
         res.writeHead(302, { location: '/article' }).end()
       else if (path === '/to-private')
@@ -182,6 +188,12 @@ describe('web fetching', () => {
       expect(requests.find((r) => r.path === '/article')!.headers.accept).toBe(
         '*/*',
       )
+    })
+
+    it('does not treat a text/plain body as a page just because it starts like one', async () => {
+      const page = await fetcher().fetch(`${base}/plain-doctype`)
+      expect(page.text).toContain('<p>shown as written</p>')
+      expect(page.prefix).toContain('cannot be simplified to markdown')
     })
 
     it('passes other text through, saying it was not simplified', async () => {
@@ -366,6 +378,14 @@ describe('web fetching', () => {
         const message = await failure(fetcher().fetch(`${base}${path}`))
         expect(message, path).toContain('does not allow automated fetching')
       }
+      expect(paths()).toEqual([])
+    })
+
+    it('matches a rule that names a query string, in the resolved spelling too', async () => {
+      disallow('User-agent: *\nDisallow: /private?id=')
+      // as written the path is //private, so only the resolved spelling matches
+      const message = await failure(fetcher().fetch(`${base}//private?id=1`))
+      expect(message).toContain('does not allow automated fetching')
       expect(paths()).toEqual([])
     })
 

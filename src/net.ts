@@ -34,12 +34,12 @@ export class FetchRefusedError extends Error {
 const IPV6_BRACKETS = /^\[|\]$/g
 // IPv6 addresses have 8 groups of 16-bit values (128 bits total).
 const IPV6_GROUPS_COUNT = 8
-// IPv4-mapped IPv6 prefix (::ffff:0:0/96) for IPv4-compatible addresses.
+// IPv4-mapped addresses, ::ffff:a.b.c.d (::ffff:0:0/96): group 5 is 0xffff.
 const IPV4_MAPPED_PREFIX = 0xffff
-// NAT64 prefix (64:ff9b:1::/48) for well-known translation.
+// The well-known NAT64 prefix, 64:ff9b::/96: groups 0 and 1.
 const NAT64_PREFIX_HIGH = 0x64
 const NAT64_PREFIX_MID = 0xff9b
-// IPv4-translated IPv6 prefix (::ffff:0:0/96).
+// IPv4-translated (SIIT) addresses, ::ffff:0:a.b.c.d (::ffff:0:0:0/96): group 3 is 0xffff.
 const IPV4_TRANSLATED_PREFIX = 0xffff
 
 // IANA special-purpose ranges that are not public destinations (the list
@@ -182,8 +182,10 @@ export function isPublicAddress(raw: string): boolean {
  * subdomain at any depth but not example.com itself. No scheme, port or path.
  */
 export function normalizeAllowedHost(entry: string): string {
-  const value = normalizeHostname(entry.trim())
-  const wildcard = entry.trim().toLowerCase().startsWith('*.')
+  // Brackets are stripped only from the IPv6 literal below, so a bracket in a
+  // host name is rejected rather than silently dropped.
+  const value = entry.trim().replace(/\.$/, '').toLowerCase()
+  const wildcard = value.startsWith('*.')
   const name = wildcard ? value.slice(2) : value
   const literal = name.replace(IPV6_BRACKETS, '')
   if (!wildcard && net.isIP(literal)) {

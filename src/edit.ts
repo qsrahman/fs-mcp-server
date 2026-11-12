@@ -231,15 +231,21 @@ function formatDifference(
     ),
   )
   const oldDiffLine = clipLine(oldLines[differs])
+  if (best + differs >= lineCount) {
+    // There is no file line to show: the file ends before oldText does.
+    return {
+      message:
+        `oldText line ${differs + 1} (${JSON.stringify(oldDiffLine.clipped)}) ` +
+        `runs past the end of the file, which ends at line ${lineCount}.`,
+      wasCut: oldDiffLine.wasCut,
+    }
+  }
   const fileDiffLine = clipLine(fileLines[best + differs])
   const message =
-    best + differs >= lineCount
-      ? `oldText line ${differs + 1} (${JSON.stringify(oldDiffLine.clipped)}) ` +
-        `runs past the end of the file, which ends at line ${lineCount}.`
-      : `First difference, oldText line ${differs + 1} against file line ` +
-        `${best + differs + 1}:\n` +
-        `  oldText: ${JSON.stringify(oldDiffLine.clipped)}\n` +
-        `  file:    ${JSON.stringify(fileDiffLine.clipped)}`
+    `First difference, oldText line ${differs + 1} against file line ` +
+    `${best + differs + 1}:\n` +
+    `  oldText: ${JSON.stringify(oldDiffLine.clipped)}\n` +
+    `  file:    ${JSON.stringify(fileDiffLine.clipped)}`
   return {
     message,
     wasCut: oldDiffLine.wasCut || fileDiffLine.wasCut,
