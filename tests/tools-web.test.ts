@@ -54,7 +54,6 @@ describe('web search tools', () => {
       'shell',
       'fetch_url',
       'brave_web_search',
-      'brave_news_search',
     ])
   })
 
@@ -66,7 +65,6 @@ describe('web search tools', () => {
       'read_multiple_files',
       'fetch_url',
       'brave_web_search',
-      'brave_news_search',
     ])
     for (const tool of tools.filter((t) => t.name.startsWith('brave_'))) {
       expect(tool.annotations).toMatchObject({
@@ -95,13 +93,6 @@ describe('web search tools', () => {
     expect(web.text).toContain('1. MCP spec')
     expect(fake.requests[0].url.searchParams.get('count')).toBe('3')
     expect(fake.requests[0].headers['x-subscription-token']).toBe('test-key')
-
-    fake.replies.push({
-      body: { results: [{ title: 'Headline', url: 'https://n.test' }] },
-    })
-    const news = await call(client, 'brave_news_search', { query: 'headlines' })
-    expect(news.text).toContain('1. Headline')
-    expect(fake.requests[1].url.pathname).toBe('/news/search')
   })
 
   it('report a failed search as a tool error that does not contain the key', async () => {
@@ -118,7 +109,6 @@ describe('web search tools', () => {
     const attempts: Array<[string, Record<string, unknown>]> = [
       ['brave_web_search', { query: 'x', lang: 'en' }],
       ['brave_web_search', { query: 'x', count: 21 }],
-      ['brave_news_search', { query: 'x', count: 51 }],
       ['brave_web_search', { query: 'x', offset: 10 }],
       ['brave_web_search', { query: 'x', freshness: 'yesterday' }],
       ['brave_web_search', { query: 'x', country: 'USA' }],

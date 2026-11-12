@@ -256,7 +256,7 @@ The libraries `fetch_url` uses are dependencies, not copied code, and keep their
 
 <https://github.com/brave/brave-search-mcp-server>
 
-`brave_web_search` and `brave_news_search` (`src/brave.ts`) are adapted from this project: the endpoints, the parameters and their meaning, and the tool names follow it; the request client, the parameter subset, the result formatting and the error handling were rewritten. Its licence:
+`brave_web_search` (`src/brave.ts`) is adapted from this project: the endpoints, the parameters and their meaning, and the tool names follow it; the request client, the parameter subset, the result formatting and the error handling were rewritten. Its licence:
 
 ```text
 MIT License

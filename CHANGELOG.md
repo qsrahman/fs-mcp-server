@@ -2,6 +2,12 @@
 
 Versions follow [semver](https://semver.org). Each release's notes on GitHub are taken from the matching section here, and a release tag fails to publish without one.
 
+## [Unreleased]
+
+### Removed
+
+- **`brave_news_search`.** Use `brave_web_search` with `freshness` (`pd`, `pw`, `pm`) for recent results. `brave_web_search` is unchanged.
+
 ## [0.3.5] - 2026-11-12
 
 Fixes for regressions introduced by the refactors in 0.3.4.

@@ -1,4 +1,4 @@
-// Brave Search for the brave_web_search and brave_news_search tools.
+// Brave Search for the brave_web_search tool.
 //
 // Adapted from brave/brave-search-mcp-server (MIT License, Copyright (c) 2024
 // Anthropic, PBC and (c) 2025 Brave Software, Inc; see THIRD_PARTY_NOTICES.md):
@@ -12,9 +12,9 @@ import { z } from 'zod'
 const BRAVE_API_BASE = 'https://api.search.brave.com/res/v1'
 
 const REQUEST_TIMEOUT_MS = 15_000
-// Brave's free plan allows about one query per second, and a model that asks
-// for web and news results at once will hit that. A rate-limit answer that
-// says the window resets within this many seconds is waited out and retried once.
+// Brave's free plan allows about one query per second, and a model that
+// searches twice in a row will hit that. A rate-limit answer that says the
+// window resets within this many seconds is waited out and retried once.
 const MAX_RETRY_WAIT_SECONDS = 5
 
 // Text clipping limits for result display and error messages.
@@ -30,61 +30,56 @@ const LANGUAGE_TAG_REGEX = /^[A-Za-z]{2}(-[A-Za-z]{2,4})?$/
 
 const wordCount = (text: string) => text.trim().split(/\s+/).length
 
-/** The parameters the two tools share. Only `count` differs in range. */
-function searchInput(maxCount: number, defaultCount: number) {
-  return z.strictObject({
-    query: z
-      .string()
-      .min(1)
-      .max(400)
-      .refine((text) => wordCount(text) <= 50, 'Query cannot exceed 50 words')
-      .describe('Search query, at most 400 characters and 50 words.'),
-    count: z
-      .number()
-      .int()
-      .min(1)
-      .max(maxCount)
-      .optional()
-      .describe(`Number of results, 1-${maxCount} (default ${defaultCount}).`),
-    offset: z
-      .number()
-      .int()
-      .min(0)
-      .max(9)
-      .optional()
-      .describe(
-        'Pages to skip, each of `count` results (0-9, default 0). Use 1 for the second page.',
-      ),
-    freshness: z
-      .string()
-      .regex(FRESHNESS_REGEX)
-      .optional()
-      .describe(
-        'Only results discovered in a time window: pd (last 24 hours), pw (7 days), pm (31 days), py (365 days), or a range such as 2024-01-01to2024-03-31.',
-      ),
-    country: z
-      .string()
-      .regex(COUNTRY_CODE_REGEX)
-      .optional()
-      .describe(
-        'Two-letter country code that results should come from, for example US, GB or DE (default US), or ALL.',
-      ),
-    search_lang: z
-      .string()
-      .regex(LANGUAGE_TAG_REGEX)
-      .optional()
-      .describe(
-        'Language of the results, for example en, de, pt-br or zh-hans (default en).',
-      ),
-    safesearch: z
-      .enum(['off', 'moderate', 'strict'])
-      .optional()
-      .describe('Adult-content filtering (default moderate).'),
-  })
-}
+export const webSearchInput = z.strictObject({
+  query: z
+    .string()
+    .min(1)
+    .max(400)
+    .refine((text) => wordCount(text) <= 50, 'Query cannot exceed 50 words')
+    .describe('Search query, at most 400 characters and 50 words.'),
+  count: z
+    .number()
+    .int()
+    .min(1)
+    .max(20)
+    .optional()
+    .describe('Number of results, 1-20 (default 10).'),
+  offset: z
+    .number()
+    .int()
+    .min(0)
+    .max(9)
+    .optional()
+    .describe(
+      'Pages to skip, each of `count` results (0-9, default 0). Use 1 for the second page.',
+    ),
+  freshness: z
+    .string()
+    .regex(FRESHNESS_REGEX)
+    .optional()
+    .describe(
+      'Only results discovered in a time window: pd (last 24 hours), pw (7 days), pm (31 days), py (365 days), or a range such as 2024-01-01to2024-03-31.',
+    ),
+  country: z
+    .string()
+    .regex(COUNTRY_CODE_REGEX)
+    .optional()
+    .describe(
+      'Two-letter country code that results should come from, for example US, GB or DE (default US), or ALL.',
+    ),
+  search_lang: z
+    .string()
+    .regex(LANGUAGE_TAG_REGEX)
+    .optional()
+    .describe(
+      'Language of the results, for example en, de, pt-br or zh-hans (default en).',
+    ),
+  safesearch: z
+    .enum(['off', 'moderate', 'strict'])
+    .optional()
+    .describe('Adult-content filtering (default moderate).'),
+})
 
-export const webSearchInput = searchInput(20, 10)
-export const newsSearchInput = searchInput(50, 10)
 type SearchInput = z.infer<typeof webSearchInput>
 
 // Only the fields that are used. The response comes from the network, so it is
@@ -94,17 +89,12 @@ const result = z.object({
   url: z.string().optional(),
   description: z.string().optional(),
   age: z.string().optional(),
-  breaking: z.boolean().optional(),
   meta_url: z.object({ hostname: z.string().optional() }).optional(),
 })
 const query = z.object({ altered: z.string().optional() }).optional()
 const webResponse = z.object({
   query,
   web: z.object({ results: z.array(result).optional() }).optional(),
-})
-const newsResponse = z.object({
-  query,
-  results: z.array(result).optional(),
 })
 
 type Result = z.infer<typeof result>
@@ -126,11 +116,7 @@ function formatResults(
       : '')
   const entries = results.map((entry, index) => {
     const source = entry.meta_url?.hostname
-    const meta = [
-      entry.breaking ? 'BREAKING' : undefined,
-      source,
-      entry.age,
-    ].filter(Boolean)
+    const meta = [source, entry.age].filter(Boolean)
     return [
       `${index + 1}. ${clip(entry.title ?? '(untitled)', MAX_TITLE_CHARS)}` +
         (meta.length > 0 ? ` (${meta.join(', ')})` : ''),
@@ -311,7 +297,7 @@ export function createBrave({
   return {
     async web(input: SearchInput, signal?: AbortSignal): Promise<string> {
       // result_filter=web leaves out the discussions, videos, FAQ and news
-      // sections: this tool is for pages, and news has its own tool.
+      // sections: this tool is for pages.
       const body = parse(
         webResponse,
         await request(
@@ -327,18 +313,6 @@ export function createBrave({
         input.query,
         body.query?.altered,
         body.web?.results ?? [],
-      )
-    },
-    async news(input: SearchInput, signal?: AbortSignal): Promise<string> {
-      const body = parse(
-        newsResponse,
-        await request('/news/search', input, {}, 10, signal),
-      )
-      return formatResults(
-        'news',
-        input.query,
-        body.query?.altered,
-        body.results ?? [],
       )
     },
   }

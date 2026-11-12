@@ -1,11 +1,6 @@
 // fetch_url follows modelcontextprotocol/servers (src/fetch) and the Brave tools are
 // adapted from brave/brave-search-mcp-server; see THIRD_PARTY_NOTICES.md.
-import {
-  createBrave,
-  newsSearchInput,
-  webSearchInput,
-  type BraveOptions,
-} from '../brave.js'
+import { createBrave, webSearchInput, type BraveOptions } from '../brave.js'
 import {
   DEFAULT_MAX_LENGTH,
   createWebFetcher,
@@ -87,23 +82,10 @@ export function registerSearchTools(
       description:
         'Search the web with Brave Search and return the top results, each with a title, URL, age and description. ' +
         'Use it for current information, facts, documentation and anything that is not in the files. ' +
-        `${buildUntrustedDisclaimer('results')} Use offset for more results, and freshness to limit to recent pages. Use brave_news_search for news.`,
+        `${buildUntrustedDisclaimer('results')} Use offset for more results, and freshness to limit to recent pages.`,
       inputSchema: webSearchInput,
       annotations: WEB_ANNOTATIONS,
     },
     async (args, ctx) => text(await brave.web(args, ctx.mcpReq.signal)),
-  )
-  registerTool(
-    'brave_news_search',
-    {
-      title: 'Brave News Search',
-      description:
-        'Search news articles with Brave Search and return the top results, each with a title, source, URL, age and snippet. ' +
-        'Use it for recent events and breaking news. ' +
-        `${buildUntrustedDisclaimer('results')} Use freshness to limit how recent the articles are.`,
-      inputSchema: newsSearchInput,
-      annotations: WEB_ANNOTATIONS,
-    },
-    async (args, ctx) => text(await brave.news(args, ctx.mcpReq.signal)),
   )
 }

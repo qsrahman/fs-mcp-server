@@ -135,52 +135,6 @@ describe('brave_web_search results', () => {
   })
 })
 
-describe('brave_news_search', () => {
-  it('calls the news endpoint and shows source, age and breaking news', async () => {
-    fake.replies.push({
-      body: {
-        type: 'news',
-        results: [
-          {
-            title: 'Big story',
-            url: 'https://news.test/a',
-            description: 'Something happened.',
-            age: '3 hours ago',
-            breaking: true,
-            meta_url: { hostname: 'news.test' },
-          },
-          {
-            title: 'Quiet story',
-            url: 'https://news.test/b',
-            age: '1 day ago',
-          },
-        ],
-      },
-    })
-    const text = await brave.news({
-      query: 'election',
-      count: 30,
-      freshness: 'pd',
-    })
-    const { url } = fake.requests[0]
-    expect(url.pathname).toBe('/news/search')
-    expect(url.searchParams.has('result_filter')).toBe(false)
-    expect(url.searchParams.get('count')).toBe('30')
-    expect(url.searchParams.get('freshness')).toBe('pd')
-    expect(text).toContain('1. Big story (BREAKING, news.test, 3 hours ago)')
-    expect(text).toContain('   https://news.test/a')
-    expect(text).toContain('   Something happened.')
-    expect(text).toContain('2. Quiet story (1 day ago)')
-  })
-
-  it('reports no news as a plain answer', async () => {
-    fake.replies.push({ body: { type: 'news', results: [] } })
-    expect(await brave.news({ query: 'nothing' })).toBe(
-      'No news results for "nothing".',
-    )
-  })
-})
-
 describe('failures', () => {
   const failure = async (reply: Parameters<typeof fake.replies.push>[0]) => {
     fake.replies.push(reply)

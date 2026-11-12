@@ -4,7 +4,7 @@ Guidance for AI coding agents working in this repo. See [README.md](README.md) f
 
 ## Overview
 
-A stdio MCP server (TypeScript, ESM, Node) exposing four filesystem tools (`read_file`, `read_multiple_files`, `write_file`, `edit_file`) plus a `shell` tool (ported from tiny-code). **By default it is unrestricted and the shell is on**; `--no-shell`, `--no-fetch`, `--read-only` and optional directories take access away. `fetch_url` (web pages as markdown) is also on by default; `brave_web_search` / `brave_news_search` appear only with `BRAVE_API_KEY`. It is a trimmed port of the reference server at `modelcontextprotocol/servers/src/filesystem`.
+A stdio MCP server (TypeScript, ESM, Node) exposing four filesystem tools (`read_file`, `read_multiple_files`, `write_file`, `edit_file`) plus a `shell` tool (ported from tiny-code). **By default it is unrestricted and the shell is on**; `--no-shell`, `--no-fetch`, `--read-only` and optional directories take access away. `fetch_url` (web pages as markdown) is also on by default; `brave_web_search` appears only with `BRAVE_API_KEY`. It is a trimmed port of the reference server at `modelcontextprotocol/servers/src/filesystem`.
 
 ## Layout
 
@@ -17,7 +17,7 @@ A stdio MCP server (TypeScript, ESM, Node) exposing four filesystem tools (`read
 - `src/edit.ts`: the `edit_file` engine and its mismatch error.
 - `src/net.ts`: `safeGet`, the HTTP GET behind `fetch_url`: address policy, host allowlist, manual redirects, byte-capped decoded reads. `isPublicAddress`, `normalizeAllowedHost`.
 - `src/web.ts`: `createWebFetcher` (robots.txt, charset decoding, Readability + turndown, a small page cache), `paginate`, the `fetch_url` input schema.
-- `src/brave.ts`: Brave Search client and result formatting for `brave_web_search` / `brave_news_search` (adapted from brave/brave-search-mcp-server).
+- `src/brave.ts`: Brave Search client and result formatting for `brave_web_search` (adapted from brave/brave-search-mcp-server).
 - `THIRD_PARTY_NOTICES.md`: licences of the code adapted from other projects; it ships in the npm package.
 - `tests/*.test.ts`: vitest. One file per `src/` module, plus `server.test.ts` and `tools-*.test.ts`, which drive `createServer` through an in-memory MCP client. `harness.ts` gives those files a temp directory and `connect`/`connectTo`; `helpers.ts` makes the temp directories and the fake Brave server.
 - `dist/`: build output (`pnpm build`). Never edit by hand.
