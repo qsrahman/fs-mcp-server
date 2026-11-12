@@ -9,6 +9,14 @@ import { serveStdio } from '@modelcontextprotocol/server/stdio'
 import { normalizeAllowedHost } from './net.js'
 import { createServer } from './server.js'
 
+function parseAllowedHosts(hostLists: string[]): string[] | undefined {
+  const normalized = hostLists
+    .flatMap((list) => list.split(','))
+    .filter((entry) => entry.trim() !== '')
+    .map(normalizeAllowedHost)
+  return normalized.length > 0 ? normalized : undefined
+}
+
 /**
  * Keeps both the given and the realpath'd spelling (e.g. macOS /var and
  * /private/var), so a path under either is accepted; validatePath still
@@ -47,11 +55,7 @@ export function parseArgs(args: string[]) {
       'allowed-hosts': { type: 'string', multiple: true },
     },
   })
-  // --allowed-hosts takes a comma-separated list and may be repeated.
-  const allowedHosts = (values['allowed-hosts'] ?? [])
-    .flatMap((list) => list.split(','))
-    .filter((entry) => entry.trim() !== '')
-    .map(normalizeAllowedHost)
+  const allowedHosts = parseAllowedHosts(values['allowed-hosts'] ?? [])
   return {
     directories: positionals,
     readOnly: values['read-only'],
@@ -61,7 +65,7 @@ export function parseArgs(args: string[]) {
       : {
           allowPrivateIps: values['allow-private-ips'],
           ignoreRobotsTxt: values['ignore-robots-txt'],
-          allowedHosts: allowedHosts.length > 0 ? allowedHosts : undefined,
+          allowedHosts,
         },
   }
 }
@@ -96,6 +100,28 @@ export async function resolveConfig(argv: string[], env: NodeJS.ProcessEnv) {
   return { allowedDirs, readOnly, shell, fetch, brave }
 }
 
+function buildStatusMessage(
+  readOnly: boolean,
+  shell: boolean,
+  fetch:
+    | boolean
+    | {
+        allowPrivateIps: boolean
+        ignoreRobotsTxt: boolean
+        allowedHosts?: string[]
+      },
+  brave: { apiKey: string } | undefined,
+  allowedDirs: string[] | null,
+): string {
+  const mode = readOnly ? ' (read-only)' : shell ? '' : ' (shell disabled)'
+  const fetchStatus = fetch ? '' : ' (fetch disabled)'
+  const braveStatus = brave ? ' (web search on)' : ''
+  const dirStatus = allowedDirs
+    ? `Allowed: ${allowedDirs.join(', ')}`
+    : 'File access is not restricted.'
+  return `workshop-mcp running on stdio${mode}${fetchStatus}${braveStatus}. ${dirStatus}`
+}
+
 async function main() {
   let config: Awaited<ReturnType<typeof resolveConfig>>
   try {
@@ -115,13 +141,7 @@ async function main() {
       },
     },
   )
-  const mode = readOnly ? ' (read-only)' : shell ? '' : ' (shell disabled)'
-  console.error(
-    `workshop-mcp running on stdio${mode}${fetch ? '' : ' (fetch disabled)'}${brave ? ' (web search on)' : ''}. ` +
-      (allowedDirs
-        ? `Allowed: ${allowedDirs.join(', ')}`
-        : 'File access is not restricted.'),
-  )
+  console.error(buildStatusMessage(readOnly, shell, fetch, brave, allowedDirs))
 }
 
 // Run only as the entry point (npm links the bin via a symlink, hence realpath),
