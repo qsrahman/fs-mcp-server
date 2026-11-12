@@ -2,7 +2,7 @@
 
 Versions follow [semver](https://semver.org). Each release's notes on GitHub are taken from the matching section here, and a release tag fails to publish without one.
 
-## [Unreleased]
+## [0.4.0] - 2026-11-12
 
 ### Removed
 
