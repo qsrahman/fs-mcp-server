@@ -29,6 +29,7 @@ Use pnpm (the repo pins it via `devEngines`; plain npm refuses to run).
 - `pnpm build`: compile with tsc
 - `pnpm typecheck`: type-check `src/` and `tests/` (via `tsconfig.test.json`)
 - `pnpm test`: run vitest
+- `pnpm test:coverage`: vitest with v8 coverage; fails below the floor in `vitest.config.ts` (CI runs it). `index.ts` `main()` shows as uncovered because `cli.test.ts` runs it in a child process.
 - `pnpm format`: prettier (no semicolons, single quotes, trailing commas)
 
 Before finishing a change, run `pnpm validate` (build, typecheck, test, format check). It builds first because `tests/cli.test.ts` runs the built `dist/index.js` as a separate process, the way a client does.

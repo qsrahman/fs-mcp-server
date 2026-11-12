@@ -190,6 +190,16 @@ describe('web fetching', () => {
       )
     })
 
+    it('keeps the five most recent pages and fetches an older one again', async () => {
+      const f = fetcher({ ignoreRobotsTxt: true })
+      for (const n of [1, 2, 3, 4, 5, 6]) await f.fetch(`${base}/x/${n}`)
+      expect(paths()).toHaveLength(6)
+      await f.fetch(`${base}/x/6`) // still cached
+      expect(paths()).toHaveLength(6)
+      await f.fetch(`${base}/x/1`) // the oldest was evicted
+      expect(paths()).toHaveLength(7)
+    })
+
     it('does not treat a text/plain body as a page just because it starts like one', async () => {
       const page = await fetcher().fetch(`${base}/plain-doctype`)
       expect(page.text).toContain('<p>shown as written</p>')

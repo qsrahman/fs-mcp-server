@@ -27,6 +27,13 @@ describe('isPublicAddress', () => {
     '2001:4860:4860::8888',
     '::ffff:8.8.8.8', // IPv4-mapped: the IPv4 inside decides
     '64:ff9b::808:808', // NAT64 of 8.8.8.8: reachable on an IPv6-only network
+    // globally reachable assignments inside the reserved 2001::/23
+    '2001:1::1',
+    '2001:1::2',
+    '2001:3::1',
+    '2001:4:112::1',
+    '2001:20::1',
+    '2001:30::1',
   ])('allows the public address %s', (address) => {
     expect(isPublicAddress(address)).toBe(true)
   })
@@ -53,6 +60,9 @@ describe('isPublicAddress', () => {
     'fc00::1',
     'ff02::1',
     '2001:db8::1',
+    '2001:1::3', // next to an exception, still inside the reserved 2001::/23
+    '2001:2::1', // benchmarking
+    '2001:4:113::1', // next to the AS112 exception
     '2002:7f00:1::1', // 6to4
     '::ffff:127.0.0.1', // IPv4-mapped loopback
     '::ffff:10.0.0.1',
@@ -156,6 +166,10 @@ describe('safeGet', () => {
         res
           .writeHead(200, { 'content-encoding': 'gzip' })
           .end(zlib.gzipSync('zipped body'))
+      } else if (url === '/deflate') {
+        res
+          .writeHead(200, { 'content-encoding': 'deflate' })
+          .end(zlib.deflateSync('deflated body'))
       } else if (url === '/gzip-bomb') {
         // a few KB on the wire, far over the cap once inflated
         res
@@ -224,6 +238,21 @@ describe('safeGet', () => {
 
     it('decompresses gzip', async () => {
       expect((await get('/gzip')).body.toString()).toBe('zipped body')
+    })
+
+    it('decompresses deflate', async () => {
+      expect((await get('/deflate')).body.toString()).toBe('deflated body')
+    })
+
+    it('reports a host name that does not resolve', async () => {
+      const message = await failure(
+        safeGet('http://no-such-host.invalid/', {
+          timeoutMs: 3000,
+          permit: open,
+        }),
+      )
+      // ENOTFOUND with a working resolver, EAI_AGAIN or a timeout without one
+      expect(message).toMatch(/ENOTFOUND|EAI_AGAIN|timed out/)
     })
 
     it('follows redirects, reporting the final URL', async () => {

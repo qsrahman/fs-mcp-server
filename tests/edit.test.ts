@@ -113,6 +113,17 @@ describe('edit_file no-match error', () => {
     )
   })
 
+  it('does not search a huge file for the closest text when that would take too long', async () => {
+    // 6,000 lines against an oldText with about 3,000 distinct bigrams is
+    // past the work limit, and nothing in the file resembles it anyway
+    const oldText = Array.from({ length: 3000 }, (_, i) =>
+      String.fromCharCode(0x4e00 + i),
+    ).join('')
+    expect(await edit('x\n'.repeat(6000), oldText)).toContain(
+      'too many to search for the closest text',
+    )
+  })
+
   it('cuts a very long file line', async () => {
     const message = await edit('x'.repeat(2000) + '\n', 'x'.repeat(10) + 'y')
     expect(message).toContain('[... cut: the line has 2000 characters]')
@@ -170,6 +181,16 @@ describe('edit arguments and output', () => {
     expect(diff).toBe(
       '```diff\n--- a.txt\n+++ a.txt\n@@ -1,2 +1,2 @@\n one\n-two\n+TWO\n```\n\n',
     )
+  })
+})
+
+describe('the diff it returns', () => {
+  it('uses a longer fence when the diff itself contains backticks', async () => {
+    const f = path.join(root, 'fence.md')
+    await fs.writeFile(f, 'x\n```\ny\n')
+    const diff = await applyFileEdits(f, [{ oldText: 'x', newText: 'z' }])
+    expect(diff.startsWith('````diff\n')).toBe(true)
+    expect(diff.trimEnd().endsWith('````')).toBe(true)
   })
 })
 

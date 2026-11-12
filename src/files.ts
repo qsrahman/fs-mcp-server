@@ -42,19 +42,6 @@ function codedError(code: string): Error {
 }
 
 /**
- * Throw a coded error if a file doesn't look like readable text.
- * Used during file opening to validate UTF-8 encoding and reject binaries/directories.
- */
-function validateTextFile(
-  isDirectory: boolean,
-  fileStart: Buffer,
-  wholeFile: boolean,
-): void {
-  if (isDirectory) throw codedError('EISDIR')
-  if (!looksLikeText(fileStart, wholeFile)) throw codedError('EBINARY')
-}
-
-/**
  * Rewrite a low-level fs error into one an agent can act on, naming the path as
  * the caller spelled it. Errors without a known code (such as the access-denied
  * errors from validatePath) pass through unchanged.
@@ -114,9 +101,13 @@ async function openTextFile(
   const handle = await fs.open(filePath, 'r')
   try {
     const stats = await handle.stat()
+    // Named here, before any read: reading a directory fails with a less helpful error.
+    if (stats.isDirectory()) throw codedError('EISDIR')
     const sniff = Buffer.alloc(Math.min(BINARY_SNIFF_BYTES, stats.size))
     await handle.read(sniff, 0, sniff.length, 0) // positional: the file offset stays at 0
-    validateTextFile(stats.isDirectory(), sniff, sniff.length === stats.size)
+    if (!looksLikeText(sniff, sniff.length === stats.size)) {
+      throw codedError('EBINARY')
+    }
     return { handle, size: stats.size }
   } catch (error) {
     await handle.close()

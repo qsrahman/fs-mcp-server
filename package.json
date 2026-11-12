@@ -14,6 +14,7 @@
     "watch": "tsc --watch",
     "typecheck": "tsc -p tsconfig.test.json",
     "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
     "test:watch": "vitest",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
@@ -62,6 +63,7 @@
     "@modelcontextprotocol/client": "^2.4.0",
     "@types/node": "^26.6.6",
     "@types/turndown": "^5.0.6",
+    "@vitest/coverage-v8": "5.1.0",
     "prettier": "^3.9.10",
     "typescript": "^7.0.2",
     "vitest": "^5.1.0"

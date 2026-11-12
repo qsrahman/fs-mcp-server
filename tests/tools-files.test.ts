@@ -55,6 +55,40 @@ describe('read_multiple_files budget', () => {
   })
 })
 
+describe('read_multiple_files, once the budget is used up', () => {
+  it('skips the remaining files and says how to read them', async () => {
+    const client = await connect(false)
+    // exactly the call's 200,000-character budget: nothing is left for note.txt
+    await fs.writeFile(
+      path.join(dir, 'big.txt'),
+      ('x'.repeat(99) + '\n').repeat(2000),
+    )
+    const result = await client.callTool({
+      name: 'read_multiple_files',
+      arguments: {
+        paths: [path.join(dir, 'big.txt'), path.join(dir, 'note.txt')],
+      },
+    })
+    const text = (result.content as Array<{ text: string }>)[0].text
+    expect(text).toContain(
+      `${path.join(dir, 'note.txt')}: Skipped - the size limit for this call was reached; read it with read_file`,
+    )
+    expect(text).not.toContain('original')
+  })
+})
+
+describe('read_file tail', () => {
+  it('returns the last lines through the tool', async () => {
+    const client = await connect(false)
+    await fs.writeFile(path.join(dir, 'lines.txt'), 'a\nb\nc\nd\n')
+    const result = await client.callTool({
+      name: 'read_file',
+      arguments: { path: path.join(dir, 'lines.txt'), tail: 2 },
+    })
+    expect((result.content as Array<{ text: string }>)[0].text).toBe('c\nd')
+  })
+})
+
 describe('write_file', () => {
   it('creates missing parent directories', async () => {
     const client = await connect(false)
