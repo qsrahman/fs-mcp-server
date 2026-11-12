@@ -16,8 +16,17 @@ const REQUEST_TIMEOUT_MS = 15_000
 // for web and news results at once will hit that. A rate-limit answer that
 // says the window resets within this many seconds is waited out and retried once.
 const MAX_RETRY_WAIT_SECONDS = 5
+
+// Text clipping limits for result display and error messages.
 const MAX_TITLE_CHARS = 200
 const MAX_DESCRIPTION_CHARS = 500
+const MAX_ERROR_DETAIL_CHARS = 200
+const MAX_ERROR_STATUS_DETAIL_CHARS = 300
+
+// Regex patterns for input validation in Zod schemas.
+const FRESHNESS_REGEX = /^(pd|pw|pm|py|\d{4}-\d{2}-\d{2}to\d{4}-\d{2}-\d{2})$/
+const COUNTRY_CODE_REGEX = /^([A-Za-z]{2}|ALL)$/
+const LANGUAGE_TAG_REGEX = /^[A-Za-z]{2}(-[A-Za-z]{2,4})?$/
 
 const wordCount = (text: string) => text.trim().split(/\s+/).length
 
@@ -48,21 +57,21 @@ function searchInput(maxCount: number, defaultCount: number) {
       ),
     freshness: z
       .string()
-      .regex(/^(pd|pw|pm|py|\d{4}-\d{2}-\d{2}to\d{4}-\d{2}-\d{2})$/)
+      .regex(FRESHNESS_REGEX)
       .optional()
       .describe(
         'Only results discovered in a time window: pd (last 24 hours), pw (7 days), pm (31 days), py (365 days), or a range such as 2024-01-01to2024-03-31.',
       ),
     country: z
       .string()
-      .regex(/^([A-Za-z]{2}|ALL)$/)
+      .regex(COUNTRY_CODE_REGEX)
       .optional()
       .describe(
         'Two-letter country code that results should come from, for example US, GB or DE (default US), or ALL.',
       ),
     search_lang: z
       .string()
-      .regex(/^[A-Za-z]{2}(-[A-Za-z]{2,4})?$/)
+      .regex(LANGUAGE_TAG_REGEX)
       .optional()
       .describe(
         'Language of the results, for example en, de, pt-br or zh-hans (default en).',
@@ -136,9 +145,12 @@ function formatResults(
   return `${heading}\n\n${entries.join('\n\n')}`
 }
 
-/** Seconds until a rate limit that has run out resets, from Brave's headers. */
+/** Seconds until a rate limit that has run out resets, from Brave's headers.
+ * Brave includes one value per rate-limit window (per-second and per-month),
+ * comma-separated. This finds which window is exhausted (remaining <= 0) and
+ * returns its reset time.
+ */
 function secondsUntilReset(headers: Headers): number | undefined {
-  // Brave lists one value per window (per second, per month), comma separated.
   const numbers = (name: string) =>
     (headers.get(name) ?? '')
       .split(',')
@@ -174,24 +186,37 @@ async function failure(response: Response): Promise<Error> {
     error.meta?.component === 'authentication' ||
     /TOKEN/.test(error.code ?? '')
   ) {
+    const detailMsg = detail ? `: ${clip(detail, MAX_ERROR_DETAIL_CHARS)}` : ''
     return new Error(
-      `Brave Search rejected the API key (HTTP ${status}${detail ? `: ${clip(detail, 200)}` : ''}). ` +
+      `Brave Search rejected the API key (HTTP ${status}${detailMsg}). ` +
         'Check BRAVE_API_KEY, and that the plan allows this search.',
     )
   }
   if (status === 429) {
     const wait = secondsUntilReset(response.headers)
+    const waitMsg = wait === undefined ? '.' : `; it resets in ${wait} seconds.`
     return new Error(
-      'Brave Search rate limit reached' +
-        (wait === undefined ? '.' : `; it resets in ${wait} seconds.`) +
-        ' Try again later, or make fewer searches.',
+      `Brave Search rate limit reached${waitMsg} Try again later, or make fewer searches.`,
     )
   }
+
+  const statusText = response.statusText ? ` ${response.statusText}` : ''
+  const detailMsg = detail
+    ? `: ${clip(detail, MAX_ERROR_STATUS_DETAIL_CHARS)}`
+    : ''
+  const hintMsg = status === 422 ? ' (check the search parameters).' : '.'
   return new Error(
-    `Brave Search returned HTTP ${status}${response.statusText ? ` ${response.statusText}` : ''}` +
-      (detail ? `: ${clip(detail, 300)}` : '') +
-      (status === 422 ? ' (check the search parameters).' : '.'),
+    `Brave Search returned HTTP ${status}${statusText}${detailMsg}${hintMsg}`,
   )
+}
+
+/** Build HTTP headers for a Brave Search request. */
+function buildHeaders(apiKey: string) {
+  return {
+    Accept: 'application/json',
+    'Accept-Encoding': 'gzip',
+    'X-Subscription-Token': apiKey,
+  }
 }
 
 export interface BraveOptions {
@@ -228,11 +253,7 @@ export function createBrave({
     for (let attempt = 1; ; attempt++) {
       const timeout = AbortSignal.timeout(REQUEST_TIMEOUT_MS)
       const response = await fetch(url, {
-        headers: {
-          Accept: 'application/json',
-          'Accept-Encoding': 'gzip',
-          'X-Subscription-Token': apiKey,
-        },
+        headers: buildHeaders(apiKey),
         signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
       }).catch((error: unknown) => {
         if (timeout.aborted) {
