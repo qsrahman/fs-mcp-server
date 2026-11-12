@@ -42,6 +42,19 @@ function codedError(code: string): Error {
 }
 
 /**
+ * Throw a coded error if a file doesn't look like readable text.
+ * Used during file opening to validate UTF-8 encoding and reject binaries/directories.
+ */
+function validateTextFile(
+  isDirectory: boolean,
+  fileStart: Buffer,
+  wholeFile: boolean,
+): void {
+  if (isDirectory) throw codedError('EISDIR')
+  if (!looksLikeText(fileStart, wholeFile)) throw codedError('EBINARY')
+}
+
+/**
  * Rewrite a low-level fs error into one an agent can act on, naming the path as
  * the caller spelled it. Errors without a known code (such as the access-denied
  * errors from validatePath) pass through unchanged.
@@ -101,12 +114,9 @@ async function openTextFile(
   const handle = await fs.open(filePath, 'r')
   try {
     const stats = await handle.stat()
-    if (stats.isDirectory()) throw codedError('EISDIR')
     const sniff = Buffer.alloc(Math.min(BINARY_SNIFF_BYTES, stats.size))
     await handle.read(sniff, 0, sniff.length, 0) // positional: the file offset stays at 0
-    if (!looksLikeText(sniff, sniff.length === stats.size)) {
-      throw codedError('EBINARY')
-    }
+    validateTextFile(stats.isDirectory(), sniff, sniff.length === stats.size)
     return { handle, size: stats.size }
   } catch (error) {
     await handle.close()
@@ -121,6 +131,47 @@ interface ReadOptions {
   limit?: number
   /** Most characters to return. */
   maxChars?: number
+}
+
+/**
+ * Read lines from a file handle using readline, collecting them with a character budget.
+ * Returns collected lines and the next offset if more lines remain.
+ */
+async function readLinesFromHandle(
+  handle: FileHandle,
+  startLine: number,
+  limitLines: number,
+  maxChars: number,
+): Promise<{ lines: string[]; nextOffset?: number; totalLines: number }> {
+  const input = handle.createReadStream({ encoding: 'utf-8' })
+  const rl = createInterface({ input, crlfDelay: Infinity })
+  const lines: string[] = []
+  let chars = 0
+  let lineNumber = 0
+  let nextOffset: number | undefined
+  try {
+    for await (const line of rl) {
+      lineNumber++
+      if (lineNumber < startLine) continue
+      if (
+        lines.length >= limitLines ||
+        (lines.length > 0 && chars + line.length + 1 > maxChars)
+      ) {
+        nextOffset = lineNumber
+        break
+      }
+      // A single line longer than the whole budget is cut, not skipped.
+      const shown = truncateLine(line, maxChars)
+      lines.push(shown)
+      chars += shown.length + 1
+    }
+  } finally {
+    rl.close()
+    // rl.close() leaves the stream open on an early exit; destroying it
+    // stops the pending read before the handle is closed below.
+    input.destroy()
+  }
+  return { lines, nextOffset, totalLines: lineNumber }
 }
 
 /**
@@ -140,37 +191,15 @@ export async function readText(
       return await handle.readFile('utf-8')
     }
 
-    const input = handle.createReadStream({ encoding: 'utf-8' })
-    const rl = createInterface({ input, crlfDelay: Infinity })
-    const lines: string[] = []
-    let chars = 0
-    let lineNumber = 0
-    let nextOffset: number | undefined
-    try {
-      for await (const line of rl) {
-        lineNumber++
-        if (lineNumber < offset) continue
-        if (
-          lines.length >= limit ||
-          (lines.length > 0 && chars + line.length + 1 > maxChars)
-        ) {
-          nextOffset = lineNumber
-          break
-        }
-        // A single line longer than the whole budget is cut, not skipped.
-        const shown = truncateLine(line, maxChars)
-        lines.push(shown)
-        chars += shown.length + 1
-      }
-    } finally {
-      rl.close()
-      // rl.close() leaves the stream open on an early exit; destroying it
-      // stops the pending read before the handle is closed below.
-      input.destroy()
-    }
+    const { lines, nextOffset, totalLines } = await readLinesFromHandle(
+      handle,
+      offset,
+      limit,
+      maxChars,
+    )
 
     if (lines.length === 0 && nextOffset === undefined && offset > 1) {
-      return `[offset ${offset} is past the end of the file, which has ${lineNumber} lines]`
+      return `[offset ${offset} is past the end of the file, which has ${totalLines} lines]`
     }
     const text = lines.join('\n')
     return nextOffset === undefined
