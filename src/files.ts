@@ -6,8 +6,10 @@ import { constants } from 'node:fs'
 import path from 'node:path'
 import { createInterface } from 'node:readline'
 
+// File reading constants
 const TAIL_CHUNK_BYTES = 64 * 1024
 const BINARY_SNIFF_BYTES = 8192
+const LF_BYTE = 0x0a // newline character for binary scanning
 
 // How much text one read returns. This protects the model's context window,
 // not memory: 100,000 characters is about 25k tokens. Longer output is cut at
@@ -16,8 +18,23 @@ const MAX_READ_CHARS = 100_000
 // The same, for all files of one read_multiple_files call together.
 export const MAX_MULTI_READ_CHARS = 200_000
 
+// Regex patterns for text processing
+const CRLF_REGEX = /\r\n/g
+const TRAILING_NEWLINE_REGEX = /\n$/
+
 export const normalizeLineEndings = (text: string) =>
-  text.replace(/\r\n/g, '\n')
+  text.replace(CRLF_REGEX, '\n')
+
+// Friendly error messages for common file system error codes.
+const ERROR_MESSAGES: Record<string, (shown: string) => string> = {
+  ENOENT: (shown) => `File not found: ${shown}`,
+  EISDIR: (shown) => `${shown} is a directory, not a file`,
+  ENOTDIR: (shown) => `A parent of ${shown} is not a directory`,
+  EACCES: (shown) => `Permission denied: ${shown}`,
+  EPERM: (shown) => `Permission denied: ${shown}`,
+  EBINARY: (shown) =>
+    `${shown} looks like a binary file or is not valid UTF-8 text`,
+}
 
 /** An error carrying a Node-style `code`, which friendlyFsError understands. */
 function codedError(code: string): Error {
@@ -30,16 +47,30 @@ function codedError(code: string): Error {
  * errors from validatePath) pass through unchanged.
  */
 export function friendlyFsError(error: unknown, shown: string): Error {
-  const messages: Record<string, string> = {
-    ENOENT: `File not found: ${shown}`,
-    EISDIR: `${shown} is a directory, not a file`,
-    ENOTDIR: `A parent of ${shown} is not a directory`,
-    EACCES: `Permission denied: ${shown}`,
-    EPERM: `Permission denied: ${shown}`,
-    EBINARY: `${shown} looks like a binary file or is not valid UTF-8 text`,
-  }
-  const message = messages[(error as NodeJS.ErrnoException)?.code ?? '']
-  return message ? new Error(message, { cause: error }) : (error as Error)
+  const builder = ERROR_MESSAGES[(error as NodeJS.ErrnoException)?.code ?? '']
+  return builder
+    ? new Error(builder(shown), { cause: error })
+    : (error as Error)
+}
+
+/**
+ * Truncate a line at a character limit for display, with an indicator if cut.
+ * Used when a single line exceeds the read budget.
+ */
+function truncateLine(line: string, maxChars: number): string {
+  if (line.length <= maxChars) return line
+  return `${line.slice(0, maxChars)} [... line cut: it has ${line.length} characters]`
+}
+
+/**
+ * Build a continuation message for partial file reads, indicating where to continue.
+ */
+function buildContinuationMessage(
+  text: string,
+  offset: number,
+  nextOffset: number,
+): string {
+  return `${text}\n[... showing lines ${offset}-${nextOffset - 1}; more lines follow. Continue with read_file offset=${nextOffset}]`
 }
 
 /**
@@ -127,10 +158,7 @@ export async function readText(
           break
         }
         // A single line longer than the whole budget is cut, not skipped.
-        const shown =
-          line.length > maxChars
-            ? `${line.slice(0, maxChars)} [... line cut: it has ${line.length} characters]`
-            : line
+        const shown = truncateLine(line, maxChars)
         lines.push(shown)
         chars += shown.length + 1
       }
@@ -147,7 +175,7 @@ export async function readText(
     const text = lines.join('\n')
     return nextOffset === undefined
       ? text
-      : `${text}\n[... showing lines ${offset}-${nextOffset - 1}; more lines follow. Continue with read_file offset=${nextOffset}]`
+      : buildContinuationMessage(text, offset, nextOffset)
   } finally {
     await handle.close()
   }
@@ -176,11 +204,11 @@ export async function tailFile(
       await handle.read(chunk, 0, length, position)
       chunks.unshift(chunk)
       bytes += length
-      for (const byte of chunk) if (byte === 0x0a) newlines++
+      for (const byte of chunk) if (byte === LF_BYTE) newlines++
     }
     const text = normalizeLineEndings(
       Buffer.concat(chunks).toString('utf-8'),
-    ).replace(/\n$/, '')
+    ).replace(TRAILING_NEWLINE_REGEX, '')
     const lines = text === '' ? [] : text.split('\n')
     // Unless the start of the file was reached, the first line is partial.
     if (position > 0) lines.shift()
