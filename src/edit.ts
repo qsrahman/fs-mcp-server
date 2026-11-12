@@ -24,6 +24,42 @@ export const fileEditSchema = z.strictObject({
 })
 type FileEdit = z.infer<typeof fileEditSchema>
 
+// Utility helpers
+
+/** Count occurrences of a pattern in text using regex. */
+function countMatches(text: string, pattern: RegExp): number {
+  const matches = text.match(pattern)
+  return matches?.length ?? 0
+}
+
+/** Detect whether file uses CRLF line endings (vs LF). */
+function usesCRLF(content: string): boolean {
+  const crlfCount = countMatches(content, /\r\n/g)
+  const lfCount = countMatches(content, /(?<!\r)\n/g)
+  return crlfCount > lfCount
+}
+
+/** Strip all whitespace from a line for comparison. */
+function removeWhitespace(text: string): string {
+  return text.replace(/\s+/g, '')
+}
+
+/** Clip a line at a character limit for display in error messages. */
+function clipLine(
+  line: string,
+  maxChars: number = MISMATCH_MAX_LINE_CHARS,
+): { clipped: string; wasCut: boolean } {
+  if (line.length <= maxChars) {
+    return { clipped: line, wasCut: false }
+  }
+  return {
+    clipped:
+      line.slice(0, maxChars) +
+      ` [... cut: the line has ${line.length} characters]`,
+    wasCut: true,
+  }
+}
+
 function indentOf(line: string): string {
   return line.slice(0, line.length - line.trimStart().length)
 }
@@ -121,7 +157,7 @@ interface LineGrams {
 
 /** A line's character bigrams with all whitespace removed, for similarity. */
 function lineGrams(line: string): LineGrams {
-  const text = line.replace(/\s+/g, '')
+  const text = removeWhitespace(line)
   const grams = new Map<string, number>()
   if (text.length === 1) grams.set(text, 1)
   for (let i = 0; i < text.length - 1; i++) {
@@ -227,18 +263,12 @@ function describeEditMismatch(
     best + oldLines.length + MISMATCH_CONTEXT_LINES,
     start + MISMATCH_MAX_REGION_LINES,
   )
-  let clipped = false
-  const clip = (line: string): string => {
-    if (line.length <= MISMATCH_MAX_LINE_CHARS) return line
-    clipped = true
-    return (
-      line.slice(0, MISMATCH_MAX_LINE_CHARS) +
-      ` [... cut: the line has ${line.length} characters]`
-    )
-  }
-  const numbered = fileLines
-    .slice(start, end)
-    .map((line, k) => `${start + k + 1}: ${clip(line)}`)
+  let wasAnyLineCut = false
+  const numbered = fileLines.slice(start, end).map((line, k) => {
+    const { clipped, wasCut } = clipLine(line)
+    wasAnyLineCut = wasAnyLineCut || wasCut
+    return `${start + k + 1}: ${clipped}`
+  })
   const after = editIndex > 0 ? ', after the earlier edits in this call' : ''
   parts.push(
     `Closest text in the file (lines ${start + 1}-${end} of ` +
@@ -255,17 +285,19 @@ function describeEditMismatch(
         best + j >= lineCount || line.trim() !== fileLines[best + j].trim(),
     ),
   )
+  const oldDiffLine = clipLine(oldLines[differs])
+  const fileDiffLine = clipLine(fileLines[best + differs])
   parts.push(
     best + differs >= lineCount
-      ? `oldText line ${differs + 1} (${JSON.stringify(clip(oldLines[differs]))}) ` +
+      ? `oldText line ${differs + 1} (${JSON.stringify(oldDiffLine.clipped)}) ` +
           `runs past the end of the file, which ends at line ${lineCount}.`
       : `First difference, oldText line ${differs + 1} against file line ` +
           `${best + differs + 1}:\n` +
-          `  oldText: ${JSON.stringify(clip(oldLines[differs]))}\n` +
-          `  file:    ${JSON.stringify(clip(fileLines[best + differs]))}`,
+          `  oldText: ${JSON.stringify(oldDiffLine.clipped)}\n` +
+          `  file:    ${JSON.stringify(fileDiffLine.clipped)}`,
   )
   parts.push(
-    clipped
+    wasAnyLineCut
       ? 'Some lines above were cut. Read the file to copy oldText from it ' +
           'exactly.'
       : 'Retry with oldText copied exactly from the file, without the ' +
@@ -335,8 +367,7 @@ export async function applyFileEdits(
   if (edits.some((edit) => edit.oldText === '')) {
     throw new Error('oldText must not be empty')
   }
-  const crlf =
-    (raw.match(/\r\n/g)?.length ?? 0) > (raw.match(/(?<!\r)\n/g)?.length ?? 0)
+  const crlf = usesCRLF(raw)
   const original = normalizeLineEndings(raw)
 
   let modified = original
