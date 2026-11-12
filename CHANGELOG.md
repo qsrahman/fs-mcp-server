@@ -2,6 +2,14 @@
 
 Versions follow [semver](https://semver.org). Each release's notes on GitHub are taken from the matching section here, and a release tag fails to publish without one.
 
+## [0.3.4] - 2026-11-12
+
+No change to the server.
+
+### Added
+
+- A security policy (`SECURITY.md`): how to report a vulnerability privately, and what counts as one.
+
 ## [0.3.3] - 2026-11-11
 
 No change to the server. This release exercises the new release pipeline.
