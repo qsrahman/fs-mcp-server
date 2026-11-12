@@ -2,6 +2,20 @@
 
 Versions follow [semver](https://semver.org). Each release's notes on GitHub are taken from the matching section here, and a release tag fails to publish without one.
 
+## [0.4.1] - 2026-11-12
+
+No change in what the server does; the changes are to tests and tooling.
+
+### Changed
+
+- `read_file` on a directory checks for it before reading again, so the clear "is a directory" message comes from a deliberate check (0.3.4's refactor had left that check unreachable).
+- The release workflow's smoke test retries the provenance check for about three minutes, since the registry can serve the attestation a little after the version.
+
+### Added
+
+- 16 tests for previously uncovered code (`read_multiple_files` budget, cache eviction, `deflate`, IPv6 exceptions, the mismatch search limit and others), a `pnpm test:coverage` script, and a coverage floor that CI enforces.
+- A rule in `AGENTS.md` for refactor-only commits.
+
 ## [0.4.0] - 2026-11-12
 
 ### Removed
