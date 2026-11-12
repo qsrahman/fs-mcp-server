@@ -191,8 +191,14 @@ jobs:
           cd "$dir"
           npm init -y > /dev/null
           npm install "$pkg"
-          # verifies the registry signatures and the provenance attestation
-          npm audit signatures
+          # Verifies the registry signatures and the provenance attestation. The
+          # attestation can be served a few minutes after the version itself
+          # (a 404 until then), so retry before calling it a failure.
+          for attempt in 1 2 3 4 5 6 7 8 9 10 11 12; do
+            npm audit signatures && break
+            [ "$attempt" = 12 ] && { echo "::error::$pkg has no verifiable attestation"; exit 1; }
+            sleep 15
+          done
           node - <<'JS'
           const { spawn } = require('node:child_process')
           const child = spawn('./node_modules/.bin/workshop-mcp', ['--no-shell'], {
