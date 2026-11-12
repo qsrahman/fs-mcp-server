@@ -14,6 +14,13 @@ import { READ_ANNOTATIONS, text, type RegisterTool } from './common.js'
 
 const MAX_READ_PATHS = 50
 
+// Annotations for write operations (write_file and edit_file).
+const WRITE_TOOL_ANNOTATIONS = {
+  readOnlyHint: false,
+  destructiveHint: true,
+  openWorldHint: false,
+}
+
 /** Run `fn`, naming `shown` (the path as the client wrote it) in any fs error. */
 async function guard<T>(shown: string, fn: () => Promise<T>): Promise<T> {
   try {
@@ -21,6 +28,21 @@ async function guard<T>(shown: string, fn: () => Promise<T>): Promise<T> {
   } catch (error) {
     throw friendlyFsError(error, shown)
   }
+}
+
+/** Format file result with prefix. */
+function formatFileResult(filePath: string, content: string): string {
+  return `${filePath}:\n${content}\n`
+}
+
+/** Format file error message. */
+function formatFileError(filePath: string, message: string): string {
+  return `${filePath}: Error - ${message}`
+}
+
+/** Format skipped file message (size limit reached). */
+function formatFileSkipped(filePath: string): string {
+  return `${filePath}: Skipped - the size limit for this call was reached; read it with read_file`
 }
 
 export function registerFileTools(
@@ -129,9 +151,7 @@ export function registerFileTools(
       const results: string[] = []
       for (const filePath of args.paths) {
         if (remaining <= 0) {
-          results.push(
-            `${filePath}: Skipped - the size limit for this call was reached; read it with read_file`,
-          )
+          results.push(formatFileSkipped(filePath))
           continue
         }
         try {
@@ -140,10 +160,10 @@ export function registerFileTools(
             readText(file, { maxChars: remaining }),
           )
           remaining -= content.length
-          results.push(`${filePath}:\n${content}\n`)
+          results.push(formatFileResult(filePath, content))
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error)
-          results.push(`${filePath}: Error - ${message}`)
+          results.push(formatFileError(filePath, message))
         }
       }
       return text(results.join('\n---\n'))
@@ -166,10 +186,8 @@ export function registerFileTools(
           .describe('The complete new contents of the file, written as given.'),
       }),
       annotations: {
-        readOnlyHint: false,
+        ...WRITE_TOOL_ANNOTATIONS,
         idempotentHint: true,
-        destructiveHint: true,
-        openWorldHint: false,
       },
     },
     async (args) => {
@@ -208,10 +226,8 @@ export function registerFileTools(
           .describe('Preview changes using git-style diff format'),
       }),
       annotations: {
-        readOnlyHint: false,
+        ...WRITE_TOOL_ANNOTATIONS,
         idempotentHint: false,
-        destructiveHint: true,
-        openWorldHint: false,
       },
     },
     async (args) => {
