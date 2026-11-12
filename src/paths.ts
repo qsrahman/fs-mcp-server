@@ -12,6 +12,9 @@ import path from 'node:path'
 // the provider answers.
 export const FS_CALL_TIMEOUT_MS = 15_000
 
+// Error codes for filesystem operations
+const ENOENT_CODE = 'ENOENT'
+
 /** A filesystem call that did not settle within the timeout. */
 class FsTimeoutError extends Error {
   constructor(operation: string, target: string, ms: number) {
@@ -60,6 +63,27 @@ function isWithin(target: string, dirs: readonly string[]): boolean {
   )
 }
 
+/** Build error message for a path outside allowed directories. */
+function accessDeniedOutsideDirectories(
+  path: string,
+  dirs: readonly string[],
+): string {
+  return (
+    `Access denied - path outside allowed directories: ${path} not in ` +
+    dirs.join(', ')
+  )
+}
+
+/** Build error message for a symlink target outside allowed directories. */
+function accessDeniedSymlinkOutside(real: string): string {
+  return `Access denied - symlink target outside allowed directories: ${real}`
+}
+
+/** Build error message for a parent directory outside allowed directories. */
+function accessDeniedParentOutside(real: string): string {
+  return `Access denied - parent directory outside allowed directories: ${real}`
+}
+
 /**
  * Resolve `requested` to a real path, or throw. With allowed directories, the
  * path must be inside them: symlinks are resolved first, so a link pointing
@@ -81,9 +105,7 @@ export async function validatePath(
     expandHome(requested),
   )
   if (allowedDirs && !isWithin(absolute, allowedDirs)) {
-    throw new Error(
-      `Access denied - path outside allowed directories: ${absolute} not in ${allowedDirs.join(', ')}`,
-    )
+    throw new Error(accessDeniedOutsideDirectories(absolute, allowedDirs))
   }
 
   // Walk up to the nearest ancestor that exists.
@@ -95,7 +117,7 @@ export async function validatePath(
       real = await withFsTimeout(fs.realpath(existing), 'realpath', existing)
       break
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+      if ((error as NodeJS.ErrnoException).code !== ENOENT_CODE) throw error
     }
     // ENOENT also means a symlink whose target is missing; name it now rather
     // than fail later with a confusing error.
@@ -115,11 +137,11 @@ export async function validatePath(
   }
 
   if (allowedDirs && !isWithin(real, allowedDirs)) {
-    throw new Error(
+    const errorMsg =
       missing.length === 0
-        ? `Access denied - symlink target outside allowed directories: ${real}`
-        : `Access denied - parent directory outside allowed directories: ${real}`,
-    )
+        ? accessDeniedSymlinkOutside(real)
+        : accessDeniedParentOutside(real)
+    throw new Error(errorMsg)
   }
   return path.join(real, ...missing)
 }
