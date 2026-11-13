@@ -2,6 +2,12 @@
 
 Versions follow [semver](https://semver.org). Each release's notes on GitHub are taken from the matching section here, and a release tag fails to publish without one.
 
+## [0.6.1] - 2026-11-13
+
+### Changed
+
+- Tool and parameter descriptions were revised against the tool-design guidance of the MCP specification and of the Anthropic, OpenAI and Google docs. They now say what to use for the neighbouring job (`list_directory` and `search_files`, `read_multiple_files` instead of repeated `read_file` calls, `brave_web_search` then `fetch_url` when `fetch_url` is offered), what a tool cannot do (`read_file` is not for directories or binary files, `fetch_url` does not run JavaScript), and what a parameter does (`dryRun` returns the diff without changing the file; `oldText` and `newText` are explained). About 75 tokens more in the default setup.
+
 ## [0.6.0] - 2026-11-12
 
 ### Added

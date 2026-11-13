@@ -166,7 +166,11 @@ export function createServer(
       fetchOptions,
     )
   }
-  if (braveOptions) registerSearchTools(registerTool, braveOptions)
+  if (braveOptions) {
+    registerSearchTools(registerTool, braveOptions, {
+      fetchAvailable: fetchOptions !== false,
+    })
+  }
 
   return server
 }

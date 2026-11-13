@@ -161,6 +161,28 @@ describe('server instructions', () => {
     expect(withShell).not.toContain('list_directory')
   })
 
+  it('tell the model when to use a tool and what it cannot do, in the descriptions', async () => {
+    const described = async (shell: boolean) =>
+      Object.fromEntries(
+        (await (await connect(false, shell)).listTools()).tools.map((tool) => [
+          tool.name,
+          tool.description ?? '',
+        ]),
+      )
+    const withoutShell = await described(false)
+    // each says what to use for the neighbouring job
+    expect(withoutShell.list_directory).toContain('use search_files')
+    expect(withoutShell.search_files).toContain('use list_directory')
+    expect(withoutShell.search_files).toContain('never by content')
+    expect(withoutShell.read_multiple_files).toContain(
+      'instead of repeated read_file',
+    )
+    expect(withoutShell.write_file).toContain('use edit_file')
+    // a caveat that explains an otherwise puzzling empty result
+    expect(withoutShell.fetch_url).toContain('does not run JavaScript')
+    expect(withoutShell.read_file).toContain('not a directory or a binary file')
+  })
+
   it('name the web tools that are offered, once, as untrusted', async () => {
     const both =
       (await connectTo(null, { brave: { apiKey: 'k' } })).getInstructions() ??

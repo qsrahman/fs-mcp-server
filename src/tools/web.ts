@@ -48,7 +48,7 @@ export function registerFetchTool(
     {
       title: 'Fetch URL',
       description:
-        'Fetch a web page you have the URL of (documentation, an article) and return its readable content as markdown. It returns text only and does not search. ' +
+        'Fetch a web page you have the URL of (documentation, an article) and return its readable content as markdown. It returns text only, does not search, and does not run JavaScript, so a page that builds its content in the browser may come back empty (try raw). ' +
         'A long page is cut: the result says which start_index to continue from. ' +
         `${buildUntrustedDisclaimer('content')} ${buildFetchPolicy(fetchOptions)}`,
       inputSchema: fetchUrlInput,
@@ -72,6 +72,7 @@ export function registerFetchTool(
 export function registerSearchTools(
   registerTool: RegisterTool,
   braveOptions: BraveOptions,
+  { fetchAvailable }: { fetchAvailable: boolean },
 ) {
   const brave = createBrave(braveOptions)
   registerTool(
@@ -79,7 +80,8 @@ export function registerSearchTools(
     {
       title: 'Brave Web Search',
       description:
-        'Search the web with Brave Search; returns the top results with title, URL, age and description. ' +
+        'Search the web with Brave Search; returns the top results with title, URL, age and description, not the pages themselves' +
+        (fetchAvailable ? ' (read one with fetch_url). ' : '. ') +
         'Use it for current information, facts, documentation and anything not in the files. ' +
         buildUntrustedDisclaimer('results'),
       inputSchema: webSearchInput,

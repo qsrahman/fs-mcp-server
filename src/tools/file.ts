@@ -68,7 +68,7 @@ export function registerFileTools(
     {
       title: 'Read File',
       description:
-        'Read a text file. Output is capped at about 100,000 characters; a longer ' +
+        'Read a text file (not a directory or a binary file). Output is capped at about 100,000 characters; a longer ' +
         'file ends with the offset to continue from. Use offset and limit for a ' +
         'range of lines, head for the first N lines or tail for the last N (use ' +
         'only one of the three).' +
@@ -132,8 +132,8 @@ export function registerFileTools(
     {
       title: 'Read Multiple Files',
       description:
-        'Read several files at once, each returned under its path; a failed read ' +
-        'does not stop the others. Output is capped at about 200,000 characters ' +
+        'Read several files in one call, instead of repeated read_file calls; each ' +
+        'is returned under its path, and a failed read does not stop the others. Output is capped at about 200,000 characters ' +
         'in total: a file that does not fit is cut, with the offset to continue ' +
         'from with read_file.' +
         onlyWithin,
@@ -182,7 +182,8 @@ export function registerFileTools(
           'symbolic links in @. recursive includes subdirectories, with names ' +
           'relative to the directory; .git and node_modules are listed but not ' +
           'entered. At most 1000 entries; the result says when it stopped, so ' +
-          'list a subdirectory for the rest.' +
+          'list a subdirectory for the rest. To find a file by name anywhere ' +
+          'below a directory, use search_files.' +
           onlyWithin,
         inputSchema: z.strictObject({
           path: pathParam,
@@ -214,7 +215,7 @@ export function registerFileTools(
           'Returns matching paths relative to `path`, one per line, directories ' +
           'ending in /. .git and node_modules are not entered (a directory with ' +
           'that name can still match). At most 1000 matches; the result says ' +
-          'when it stopped.' +
+          'when it stopped. To browse a single folder, use list_directory.' +
           onlyWithin,
         inputSchema: z.strictObject({
           path: pathParam,
@@ -296,7 +297,9 @@ export function registerFileTools(
         dryRun: z
           .boolean()
           .default(false)
-          .describe('Preview changes using git-style diff format'),
+          .describe(
+            'If true, return the diff without changing the file (default false).',
+          ),
       }),
       annotations: {
         ...WRITE_TOOL_ANNOTATIONS,

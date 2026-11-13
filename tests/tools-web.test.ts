@@ -126,6 +126,15 @@ describe('web search tools', () => {
     expect(fake.requests).toHaveLength(0)
   })
 
+  it('point to fetch_url for reading a result, only when fetch_url is offered', async () => {
+    const description = async (fetch: false | object) =>
+      (
+        await (await connectTo(null, { brave: brave(), fetch })).listTools()
+      ).tools.find((tool) => tool.name === 'brave_web_search')?.description
+    expect(await description({})).toContain('read one with fetch_url')
+    expect(await description(false)).not.toContain('fetch_url')
+  })
+
   it('tell the model to treat results as untrusted and to cite them', async () => {
     const client = await connectTo(null, { brave: brave() })
     const tools = (await client.listTools()).tools.filter((t) =>
