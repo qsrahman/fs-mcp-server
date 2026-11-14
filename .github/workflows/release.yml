@@ -190,7 +190,13 @@ jobs:
           dir=$(mktemp -d)
           cd "$dir"
           npm init -y > /dev/null
-          npm install "$pkg"
+          # The tarball can 404 for several minutes after the version is listed
+          # (0.6.2 did), so retry the install too.
+          for attempt in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+            npm install "$pkg" && break
+            [ "$attempt" = 20 ] && { echo "::error::$pkg cannot be installed"; exit 1; }
+            sleep 30
+          done
           # Verifies the registry signatures and the provenance attestation. The
           # attestation can be served a few minutes after the version itself
           # (a 404 until then), so retry before calling it a failure.
