@@ -2,6 +2,13 @@
 
 Versions follow [semver](https://semver.org). Each release's notes on GitHub are taken from the matching section here, and a release tag fails to publish without one.
 
+## [0.6.2] - 2026-11-14
+
+### Fixed
+
+- `shell`: the note added when a command's output exceeds 10,485,760 characters no longer says the command was killed. A command can exit cleanly before the limit stops it, so the note now says the output was cut off.
+- `shell`: `timeoutMs` is capped at 2,147,483,647 (the largest timeout the process library accepts). A larger value used to fail with an error that did not name the parameter; it is now refused as invalid input, and the parameter description states the limit.
+
 ## [0.6.1] - 2026-11-13
 
 ### Changed
