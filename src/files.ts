@@ -344,7 +344,7 @@ function isExcluded(
     pattern.includes('*')
       ? match(pattern) ||
         (isDirectory && pattern.endsWith('/**') && match(pattern.slice(0, -3)))
-      : match(pattern) || match(`**/${pattern}`) || match(`**/${pattern}/**`),
+      : match(pattern) || match(`**/${pattern}`),
   )
 }
 
