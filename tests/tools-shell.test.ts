@@ -36,6 +36,20 @@ describe('shell tool', () => {
     expect(text).toBe('exit code 3')
   })
 
+  it('rejects a timeoutMs execa cannot honour, naming the parameter', async () => {
+    const client = await connect(false, true)
+    const { isError, text } = await callShell(client, {
+      command: 'pwd',
+      timeoutMs: 3_000_000_000,
+    })
+    expect(isError).toBe(true)
+    expect(text).toContain('timeoutMs')
+    expect(
+      (await callShell(client, { command: 'pwd', timeoutMs: 2_147_483_647 }))
+        .isError,
+    ).toBeFalsy()
+  })
+
   it('refuses a cwd outside the allowed directories', async () => {
     const client = await connect(false, true)
     const { isError, text } = await callShell(client, {

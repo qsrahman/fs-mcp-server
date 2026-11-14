@@ -157,6 +157,15 @@ describe('output limits', () => {
     expect(result.stderr).not.toContain('timed out')
   })
 
+  // A command can exit cleanly (code 0) before execa kills anything, so the
+  // note must not claim it was killed.
+  it('does not claim the command was killed when output overflows', async () => {
+    const result = await run(
+      `node -e "process.stdout.write('a'.repeat(11 * 1024 * 1024))"`,
+    )
+    expect(result.stderr).not.toContain('killed')
+  })
+
   it('replaces binary stdout and stderr with a short note', async () => {
     const out = await run("printf 'abc\\000def'")
     expect(out.ok).toBe(true)

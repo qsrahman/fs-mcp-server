@@ -3,6 +3,9 @@ import { validatePath } from '../paths.js'
 import { DEFAULT_TIMEOUT_MS, formatResult, runShell } from '../shell.js'
 import { text, type RegisterTool } from './common.js'
 
+// The largest timeout execa accepts (a 32-bit setTimeout delay, about 24.8 days).
+const MAX_TIMEOUT_MS = 2_147_483_647
+
 /** Build the cwd parameter description based on directory restrictions. */
 function buildCwdDescription(allowedDirs: readonly string[] | null): string {
   return allowedDirs
@@ -51,9 +54,10 @@ export function registerShellTool(
         timeoutMs: z
           .int()
           .min(0)
+          .max(MAX_TIMEOUT_MS)
           .optional()
           .describe(
-            `Kill the command after this many milliseconds. Defaults to ${DEFAULT_TIMEOUT_MS}; 0 disables the timeout.`,
+            `Kill the command after this many milliseconds (at most ${MAX_TIMEOUT_MS}). Defaults to ${DEFAULT_TIMEOUT_MS}; 0 disables the timeout.`,
           ),
       }),
       annotations: {

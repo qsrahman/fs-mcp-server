@@ -79,7 +79,7 @@ export async function runShell(
   const note = result.timedOut
     ? `command timed out after ${timeoutMs}ms`
     : result.isMaxBuffer
-      ? `output exceeded ${MAX_BUFFER_CHARS} characters; command was killed`
+      ? `output exceeded ${MAX_BUFFER_CHARS} characters and was cut off`
       : result.exitCode === undefined
         ? result.signal
           ? `command was killed by ${result.signal}`
