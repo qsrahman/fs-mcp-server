@@ -2,6 +2,13 @@
 
 Versions follow [semver](https://semver.org). Each release's notes on GitHub are taken from the matching section here, and a release tag fails to publish without one.
 
+## [0.6.3] - 2026-11-14
+
+### Changed
+
+- When an `edit_file` edit matches nothing, the error now always ends with one sentence: "Retry with oldText copied exactly from the file, without the line-number prefixes. If a line above was cut, read the file to copy it exactly." Before, it ended with one of two sentences, depending on whether a quoted line was cut.
+- Internal simplifications with no change in behaviour: single-use helpers were inlined, and `brave_web_search` no longer carries code left over from the removed news search.
+
 ## [0.6.2] - 2026-11-14
 
 ### Fixed
