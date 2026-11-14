@@ -28,14 +28,15 @@ const FRESHNESS_REGEX = /^(pd|pw|pm|py|\d{4}-\d{2}-\d{2}to\d{4}-\d{2}-\d{2})$/
 const COUNTRY_CODE_REGEX = /^([A-Za-z]{2}|ALL)$/
 const LANGUAGE_TAG_REGEX = /^[A-Za-z]{2}(-[A-Za-z]{2,4})?$/
 
-const wordCount = (text: string) => text.trim().split(/\s+/).length
-
 export const webSearchInput = z.strictObject({
   query: z
     .string()
     .min(1)
     .max(400)
-    .refine((text) => wordCount(text) <= 50, 'Query cannot exceed 50 words')
+    .refine(
+      (text) => text.trim().split(/\s+/).length <= 50,
+      'Query cannot exceed 50 words',
+    )
     .describe('Search query, at most 400 characters and 50 words.'),
   count: z
     .number()
@@ -101,14 +102,13 @@ const clip = (text: string, max: number) =>
   text.length > max ? `${text.slice(0, max - 1)}…` : text
 
 function formatResults(
-  kind: string,
   searched: string,
   altered: string | undefined,
   results: Result[],
 ): string {
-  if (results.length === 0) return `No ${kind} results for "${searched}".`
+  if (results.length === 0) return `No web results for "${searched}".`
   const heading =
-    `${results.length} ${kind} results for "${searched}"` +
+    `${results.length} web results for "${searched}"` +
     (altered && altered !== searched
       ? ` (spelling corrected to "${altered}")`
       : '')
@@ -194,15 +194,6 @@ async function failure(response: Response): Promise<Error> {
   )
 }
 
-/** Build HTTP headers for a Brave Search request. */
-function buildHeaders(apiKey: string) {
-  return {
-    Accept: 'application/json',
-    'Accept-Encoding': 'gzip',
-    'X-Subscription-Token': apiKey,
-  }
-}
-
 export interface BraveOptions {
   apiKey: string
   /** Only for tests, which point this at a local server. */
@@ -214,16 +205,13 @@ export function createBrave({
   baseUrl = BRAVE_API_BASE,
 }: BraveOptions) {
   async function request(
-    path: string,
     input: SearchInput,
-    extra: Record<string, string>,
-    defaultCount: number,
     signal: AbortSignal | undefined,
   ): Promise<unknown> {
-    const url = new URL(`${baseUrl}${path}`)
+    const url = new URL(`${baseUrl}/web/search`)
     const params = url.searchParams
     params.set('q', input.query)
-    params.set('count', String(input.count ?? defaultCount))
+    params.set('count', String(input.count ?? 10))
     if (input.offset !== undefined) params.set('offset', String(input.offset))
     if (input.freshness) params.set('freshness', input.freshness)
     if (input.country) params.set('country', input.country.toUpperCase())
@@ -232,12 +220,18 @@ export function createBrave({
     if (input.safesearch) params.set('safesearch', input.safesearch)
     // Snippets come back with highlight markup unless this is off; a model has no use for it.
     params.set('text_decorations', 'false')
-    for (const [name, value] of Object.entries(extra)) params.set(name, value)
+    // This leaves out the discussions, videos, FAQ and news sections: this
+    // tool is for pages.
+    params.set('result_filter', 'web')
 
     for (let attempt = 1; ; attempt++) {
       const timeout = AbortSignal.timeout(REQUEST_TIMEOUT_MS)
       const response = await fetch(url, {
-        headers: buildHeaders(apiKey),
+        headers: {
+          Accept: 'application/json',
+          'Accept-Encoding': 'gzip',
+          'X-Subscription-Token': apiKey,
+        },
         signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
       }).catch((error: unknown) => {
         if (timeout.aborted) {
@@ -267,29 +261,13 @@ export function createBrave({
     }
   }
 
-  function parse<T>(schema: z.ZodType<T>, body: unknown): T {
-    const parsed = schema.safeParse(body)
-    if (!parsed.success)
-      throw new Error('Brave Search sent a response in an unexpected format.')
-    return parsed.data
-  }
-
   return {
     async web(input: SearchInput, signal?: AbortSignal): Promise<string> {
-      // result_filter=web leaves out the discussions, videos, FAQ and news
-      // sections: this tool is for pages.
-      const body = parse(
-        webResponse,
-        await request(
-          '/web/search',
-          input,
-          { result_filter: 'web' },
-          10,
-          signal,
-        ),
-      )
+      const parsed = webResponse.safeParse(await request(input, signal))
+      if (!parsed.success)
+        throw new Error('Brave Search sent a response in an unexpected format.')
+      const body = parsed.data
       return formatResults(
-        'web',
         input.query,
         body.query?.altered,
         body.web?.results ?? [],

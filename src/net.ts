@@ -251,14 +251,14 @@ export interface SafeResponse {
 
 class BodyTooLargeError extends Error {}
 
-// Content-Encoding values that require decompression before byte counting.
-const GZIP_ENCODINGS = new Set(['gzip', 'x-gzip'])
-const SUPPORTED_ENCODINGS = new Set([
-  'identity',
-  'gzip',
-  'x-gzip',
-  'deflate',
-  '',
+// The Content-Encoding values read, and the decoder each needs before bytes are
+// counted (none for an unencoded body).
+const DECODERS = new Map<string, (() => NodeJS.ReadWriteStream) | undefined>([
+  ['identity', undefined],
+  ['', undefined],
+  ['gzip', zlib.createGunzip],
+  ['x-gzip', zlib.createGunzip],
+  ['deflate', zlib.createInflate],
 ])
 
 /** A connection's lookup, refusing any address the policy does not permit. */
@@ -322,16 +322,13 @@ async function readBody(
   const encoding = String(response.headers['content-encoding'] ?? 'identity')
     .trim()
     .toLowerCase()
-  const decoders: NodeJS.ReadWriteStream[] = []
-  if (GZIP_ENCODINGS.has(encoding)) {
-    decoders.push(zlib.createGunzip())
-  } else if (encoding === 'deflate') {
-    decoders.push(zlib.createInflate())
-  } else if (!SUPPORTED_ENCODINGS.has(encoding)) {
+  if (!DECODERS.has(encoding)) {
     throw new Error(
       `the server answered with an unsupported content encoding (${encoding}); supported: identity, gzip, x-gzip, deflate`,
     )
   }
+  const createDecoder = DECODERS.get(encoding)
+  const decoders = createDecoder ? [createDecoder()] : []
 
   const chunks: Buffer[] = []
   let total = 0

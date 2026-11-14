@@ -32,21 +32,6 @@ async function guard<T>(shown: string, fn: () => Promise<T>): Promise<T> {
   }
 }
 
-/** Format file result with prefix. */
-function formatFileResult(filePath: string, content: string): string {
-  return `${filePath}:\n${content}\n`
-}
-
-/** Format file error message. */
-function formatFileError(filePath: string, message: string): string {
-  return `${filePath}: Error - ${message}`
-}
-
-/** Format skipped file message (size limit reached). */
-function formatFileSkipped(filePath: string): string {
-  return `${filePath}: Skipped - the size limit for this call was reached; read it with read_file`
-}
-
 export function registerFileTools(
   registerTool: RegisterTool,
   allowedDirs: readonly string[] | null,
@@ -153,7 +138,9 @@ export function registerFileTools(
       const results: string[] = []
       for (const filePath of args.paths) {
         if (remaining <= 0) {
-          results.push(formatFileSkipped(filePath))
+          results.push(
+            `${filePath}: Skipped - the size limit for this call was reached; read it with read_file`,
+          )
           continue
         }
         try {
@@ -162,10 +149,10 @@ export function registerFileTools(
             readText(file, { maxChars: remaining }),
           )
           remaining -= content.length
-          results.push(formatFileResult(filePath, content))
+          results.push(`${filePath}:\n${content}\n`)
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error)
-          results.push(formatFileError(filePath, message))
+          results.push(`${filePath}: Error - ${message}`)
         }
       }
       return text(results.join('\n---\n'))

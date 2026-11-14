@@ -35,11 +35,6 @@ function usesCRLF(content: string): boolean {
   return crlfCount > lfCount
 }
 
-/** Strip all whitespace from a line for comparison. */
-function removeWhitespace(text: string): string {
-  return text.replace(/\s+/g, '')
-}
-
 /** Clip a line at a character limit for display in error messages. */
 function clipLine(
   line: string,
@@ -148,7 +143,7 @@ interface LineGrams {
 
 /** A line's character bigrams with all whitespace removed, for similarity. */
 function lineGrams(line: string): LineGrams {
-  const text = removeWhitespace(line)
+  const text = line.replace(/\s+/g, '')
   const grams = new Map<string, number>()
   if (text.length === 1) grams.set(text, 1)
   for (let i = 0; i < text.length - 1; i++) {
@@ -190,18 +185,6 @@ function findBestMatch(
     }
   }
   return { best, bestScore }
-}
-
-/** Format file lines with line numbers for error display. */
-function formatContextLines(
-  fileLines: string[],
-  start: number,
-  end: number,
-): string {
-  return fileLines
-    .slice(start, end)
-    .map((line, k) => `${start + k + 1}: ${clipLine(line)}`)
-    .join('\n')
 }
 
 /** Format the first difference between oldText and the file. */
@@ -301,9 +284,13 @@ function describeEditMismatch(
     start + MISMATCH_MAX_REGION_LINES,
   )
   const after = editIndex > 0 ? ', after the earlier edits in this call' : ''
+  const numbered = fileLines
+    .slice(start, end)
+    .map((line, k) => `${start + k + 1}: ${clipLine(line)}`)
+    .join('\n')
   parts.push(
     `Closest text in the file (lines ${start + 1}-${end} of ` +
-      `${lineCount}${after}):\n${formatContextLines(fileLines, start, end)}`,
+      `${lineCount}${after}):\n${numbered}`,
     formatDifference(oldLines, fileLines, best, lineCount),
     'Retry with oldText copied exactly from the file, without the ' +
       'line-number prefixes. If a line above was cut, read the file to copy ' +

@@ -138,7 +138,6 @@ export function decodeBody(contentType: string, body: Buffer): string {
 const BINARY_TYPE =
   /^(image|audio|video|font)\/|^application\/(pdf|zip|gzip|x-gzip|octet-stream|x-tar|x-7z-compressed|x-rar-compressed|wasm)\b/
 const NUL = 0
-const HTML_MIME_TYPES = /^(text\/html|application\/xhtml\+xml)$/
 const HTML_SIGNATURE = /<!doctype html|<html[\s>]/i
 
 /** Text is what a model can use; images, PDFs and archives are a dead end for it. */
@@ -146,11 +145,6 @@ function isTextual(mime: string, body: Buffer): boolean {
   if (BINARY_TYPE.test(mime)) return false
   return !body.subarray(0, 8192).includes(NUL)
 }
-
-const isHtmlType = (mime: string) => HTML_MIME_TYPES.test(mime)
-const isMarkdownType = (mime: string) =>
-  mime === 'text/markdown' || mime === 'text/x-markdown'
-const looksLikeHtml = (text: string) => HTML_SIGNATURE.test(text.slice(0, 1000))
 
 // -------------------------------------------------------------- extraction
 
@@ -368,13 +362,15 @@ export function createWebFetcher(options: WebFetcherOptions) {
       prefix,
     })
 
-    if (isMarkdownType(mime)) return page(text)
+    if (mime === 'text/markdown' || mime === 'text/x-markdown')
+      return page(text)
     if (raw) return page(text)
     // A declared type decides; a body is sniffed only when there is no type, or
     // when `<html` opens it (some servers label pages text/plain).
     if (
-      isHtmlType(mime) ||
-      (!mime && looksLikeHtml(text)) ||
+      mime === 'text/html' ||
+      mime === 'application/xhtml+xml' ||
+      (!mime && HTML_SIGNATURE.test(text.slice(0, 1000))) ||
       text.slice(0, 100).includes('<html')
     ) {
       return page(await htmlToMarkdown(text, finalUrl))

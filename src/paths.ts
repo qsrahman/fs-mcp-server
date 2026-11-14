@@ -12,9 +12,6 @@ import path from 'node:path'
 // the provider answers.
 export const FS_CALL_TIMEOUT_MS = 15_000
 
-// Error codes for filesystem operations
-const ENOENT_CODE = 'ENOENT'
-
 /** A filesystem call that did not settle within the timeout. */
 export class FsTimeoutError extends Error {
   constructor(operation: string, target: string, ms: number) {
@@ -48,12 +45,6 @@ export async function withFsTimeout<T>(
   }
 }
 
-function expandHome(p: string): string {
-  return p === '~' || p.startsWith('~/')
-    ? path.join(os.homedir(), p.slice(1))
-    : p
-}
-
 function isWithin(target: string, dirs: readonly string[]): boolean {
   // A root such as "/" already ends in a separator.
   return dirs.some(
@@ -61,27 +52,6 @@ function isWithin(target: string, dirs: readonly string[]): boolean {
       target === dir ||
       target.startsWith(dir.endsWith(path.sep) ? dir : dir + path.sep),
   )
-}
-
-/** Build error message for a path outside allowed directories. */
-function accessDeniedOutsideDirectories(
-  path: string,
-  dirs: readonly string[],
-): string {
-  return (
-    `Access denied - path outside allowed directories: ${path} not in ` +
-    dirs.join(', ')
-  )
-}
-
-/** Build error message for a symlink target outside allowed directories. */
-function accessDeniedSymlinkOutside(real: string): string {
-  return `Access denied - symlink target outside allowed directories: ${real}`
-}
-
-/** Build error message for a parent directory outside allowed directories. */
-function accessDeniedParentOutside(real: string): string {
-  return `Access denied - parent directory outside allowed directories: ${real}`
 }
 
 /**
@@ -100,12 +70,16 @@ export async function validatePath(
   allowedDirs: readonly string[] | null,
 ): Promise<string> {
   if (requested.includes('\0')) throw new Error('Access denied - invalid path')
-  const absolute = path.resolve(
-    allowedDirs?.[0] ?? process.cwd(),
-    expandHome(requested),
-  )
+  const expanded =
+    requested === '~' || requested.startsWith('~/')
+      ? path.join(os.homedir(), requested.slice(1))
+      : requested
+  const absolute = path.resolve(allowedDirs?.[0] ?? process.cwd(), expanded)
   if (allowedDirs && !isWithin(absolute, allowedDirs)) {
-    throw new Error(accessDeniedOutsideDirectories(absolute, allowedDirs))
+    throw new Error(
+      `Access denied - path outside allowed directories: ${absolute} not in ` +
+        allowedDirs.join(', '),
+    )
   }
 
   // Walk up to the nearest ancestor that exists.
@@ -117,7 +91,7 @@ export async function validatePath(
       real = await withFsTimeout(fs.realpath(existing), 'realpath', existing)
       break
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== ENOENT_CODE) throw error
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
     }
     // ENOENT also means a symlink whose target is missing; name it now rather
     // than fail later with a confusing error.
@@ -137,11 +111,11 @@ export async function validatePath(
   }
 
   if (allowedDirs && !isWithin(real, allowedDirs)) {
-    const errorMsg =
+    throw new Error(
       missing.length === 0
-        ? accessDeniedSymlinkOutside(real)
-        : accessDeniedParentOutside(real)
-    throw new Error(errorMsg)
+        ? `Access denied - symlink target outside allowed directories: ${real}`
+        : `Access denied - parent directory outside allowed directories: ${real}`,
+    )
   }
   return path.join(real, ...missing)
 }

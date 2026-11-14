@@ -20,12 +20,8 @@ const MAX_READ_CHARS = 100_000
 // The same, for all files of one read_multiple_files call together.
 export const MAX_MULTI_READ_CHARS = 200_000
 
-// Regex patterns for text processing
-const CRLF_REGEX = /\r\n/g
-const TRAILING_NEWLINE_REGEX = /\n$/
-
 export const normalizeLineEndings = (text: string) =>
-  text.replace(CRLF_REGEX, '\n')
+  text.replace(/\r\n/g, '\n')
 
 // Friendly error messages for common file system error codes.
 const ERROR_MESSAGES: Record<string, (shown: string) => string> = {
@@ -55,26 +51,6 @@ export function friendlyFsError(error: unknown, shown: string): Error {
   return builder
     ? new Error(builder(shown), { cause: error })
     : (error as Error)
-}
-
-/**
- * Truncate a line at a character limit for display, with an indicator if cut.
- * Used when a single line exceeds the read budget.
- */
-function truncateLine(line: string, maxChars: number): string {
-  if (line.length <= maxChars) return line
-  return `${line.slice(0, maxChars)} [... line cut: it has ${line.length} characters]`
-}
-
-/**
- * Build a continuation message for partial file reads, indicating where to continue.
- */
-function buildContinuationMessage(
-  text: string,
-  offset: number,
-  nextOffset: number,
-): string {
-  return `${text}\n[... showing lines ${offset}-${nextOffset - 1}; more lines follow. Continue with read_file offset=${nextOffset}]`
 }
 
 /**
@@ -156,7 +132,10 @@ async function readLinesFromHandle(
         break
       }
       // A single line longer than the whole budget is cut, not skipped.
-      const shown = truncateLine(line, maxChars)
+      const shown =
+        line.length <= maxChars
+          ? line
+          : `${line.slice(0, maxChars)} [... line cut: it has ${line.length} characters]`
       lines.push(shown)
       chars += shown.length + 1
     }
@@ -199,7 +178,7 @@ export async function readText(
     const text = lines.join('\n')
     return nextOffset === undefined
       ? text
-      : buildContinuationMessage(text, offset, nextOffset)
+      : `${text}\n[... showing lines ${offset}-${nextOffset - 1}; more lines follow. Continue with read_file offset=${nextOffset}]`
   } finally {
     await handle.close()
   }
@@ -232,7 +211,7 @@ export async function tailFile(
     }
     const text = normalizeLineEndings(
       Buffer.concat(chunks).toString('utf-8'),
-    ).replace(TRAILING_NEWLINE_REGEX, '')
+    ).replace(/\n$/, '')
     const lines = text === '' ? [] : text.split('\n')
     // Unless the start of the file was reached, the first line is partial.
     if (position > 0) lines.shift()
